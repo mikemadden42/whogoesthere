@@ -84,6 +84,36 @@ cargo build --release --target x86_64-unknown-linux-musl
 The release profile is configured with LTO + single codegen unit + symbol
 stripping, so the binary is tight (~3–5 MB) and self-contained.
 
+## Development
+
+The tree currently passes every lint configuration below. They're
+ordered roughly by strictness — `fmt --check` and the default
+`-Dwarnings` clippy are the bare minimum for CI; the rest are useful
+one-shot audits when adding code.
+
+```sh
+# Formatting
+cargo fmt --all -- --check
+
+# Default clippy, warnings as errors. `-Adeprecated` keeps churn
+# from upstream API deprecations out of the failure signal.
+cargo clippy --all-targets --all-features -- -Dwarnings -Adeprecated
+
+# Stricter, opt-in lint groups (warnings, not errors — review before fixing)
+cargo clippy --all-targets --all-features -- -Wclippy::pedantic
+cargo clippy --all-targets --all-features -- -Wclippy::nursery
+cargo clippy --all-targets --all-features -- -Wclippy::cargo
+
+# "No silent panics" sweep — flags every .unwrap()/.expect()/dbg!/todo!/unimplemented!
+cargo clippy --all-targets --all-features -- \
+    -Wclippy::unwrap_used -Wclippy::expect_used \
+    -Wclippy::dbg_macro -Wclippy::todo -Wclippy::unimplemented
+
+# Release-mode check (occasionally catches lints that fire only under
+# release codegen assumptions)
+cargo clippy --release --all-targets --all-features -- -Dwarnings -Adeprecated
+```
+
 ## Status
 
 v1 is feature-complete for the eight checkers above. Tested on Fedora 44.
