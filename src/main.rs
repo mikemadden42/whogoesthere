@@ -40,7 +40,7 @@ fn main() -> anyhow::Result<()> {
         Box::new(checkers::ld_so::LdSoChecker),
     ];
 
-    let pm = package_ownership::detect();
+    let index = package_ownership::OwnershipIndex::build();
     let mut findings: Vec<Finding> = Vec::new();
 
     for c in &checkers {
@@ -50,7 +50,7 @@ fn main() -> anyhow::Result<()> {
         let mut chunk = c.run();
         for f in &mut chunk {
             if matches!(f.package, PackageOrigin::Unknown) {
-                f.package = package_ownership::owner(&f.source, pm);
+                f.package = index.owner(&f.source);
             }
         }
         findings.extend(chunk);

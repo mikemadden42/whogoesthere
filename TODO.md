@@ -2,12 +2,14 @@
 
 ## Performance
 
-- [ ] Cache package ownership lookups. Currently we fork `rpm -qf` / `dpkg -S`
-      once per finding (1343 calls on the Fedora baseline → ~12s total). One
-      pre-scan of `rpm -qa --filesbypkg` / `/var/lib/dpkg/info/*.list` into a
-      `HashMap<PathBuf, String>` at startup should bring full runs under 1s.
+- [x] Cache package ownership lookups. *Done.* Pre-scan via
+      `rpm -qa --qf "[%{=NAME}-%{=VERSION}-%{=RELEASE}.%{=ARCH}\t%{FILENAMES}\n]"`
+      on RHEL/Fedora and `/var/lib/dpkg/info/*.list` walk on Debian builds a
+      `HashMap<PathBuf, String>` at startup. Fedora full run: 15s → 0.76s
+      (~20× speedup).
 - [ ] Consider parallel checker dispatch. Currently sequential; checkers are
-      embarrassingly parallel and could run on a thread pool.
+      embarrassingly parallel and could run on a thread pool. Lower priority
+      now that total runtime is sub-second.
 
 ## Distro coverage
 
