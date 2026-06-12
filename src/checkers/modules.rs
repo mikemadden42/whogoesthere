@@ -4,6 +4,7 @@ use std::path::Path;
 
 use crate::checker::Checker;
 use crate::finding::{Finding, PackageOrigin, Scope};
+use crate::util::canonical_unique;
 
 pub struct ModulesChecker;
 
@@ -37,14 +38,14 @@ impl Checker for ModulesChecker {
             ));
         }
 
-        // systemd modules-load.d
-        for dir in LOAD_DIRS {
-            findings.extend(scan_load_dir(Path::new(dir)));
+        // systemd modules-load.d (dedup symlinked /lib → /usr/lib)
+        for dir in canonical_unique(LOAD_DIRS) {
+            findings.extend(scan_load_dir(&dir));
         }
 
         // modprobe.d — focus on `install` directives (arbitrary code execution)
-        for dir in PROBE_DIRS {
-            findings.extend(scan_probe_dir(Path::new(dir)));
+        for dir in canonical_unique(PROBE_DIRS) {
+            findings.extend(scan_probe_dir(&dir));
         }
 
         findings

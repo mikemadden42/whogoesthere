@@ -2,6 +2,7 @@ mod checker;
 mod checkers;
 mod finding;
 mod package_ownership;
+mod util;
 
 use clap::{Parser, ValueEnum};
 
