@@ -18,6 +18,12 @@
       real data.
 - [ ] Verify per-user crontabs on Debian. The `/var/spool/cron/crontabs/` path
       is supported in code but unexercised on this baseline.
+- [ ] Smoke-test the dpkg branch of the package-ownership cache on a real
+      Debian/Ubuntu box. Coded against the standard `/var/lib/dpkg/info/*.list`
+      layout (one absolute path per line, `:arch` stripped from filename to
+      match `dpkg -S`) but never exercised on real data. Check: total finding
+      count, UNTRACKED count looks sane, dpkg-diverted paths aren't producing
+      noisy false-UNTRACKEDs.
 - [ ] Check snap-generated systemd units on Ubuntu. They live in
       `/etc/systemd/system/` and may all show as UNTRACKED because snapd
       synthesizes them rather than dpkg-installing them. A pattern filter for
