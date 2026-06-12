@@ -24,11 +24,8 @@ const RUN_PREFIXES: &[&str] = &[
     "RUN=",
 ];
 
-const IMPORT_PROGRAM_PREFIXES: &[&str] = &[
-    "IMPORT{program}+=",
-    "IMPORT{program}:=",
-    "IMPORT{program}=",
-];
+const IMPORT_PROGRAM_PREFIXES: &[&str] =
+    &["IMPORT{program}+=", "IMPORT{program}:=", "IMPORT{program}="];
 
 impl Checker for UdevChecker {
     fn name(&self) -> &'static str {
@@ -118,7 +115,9 @@ fn extract_with_prefixes(
             continue;
         }
         let val_start = after + 1;
-        let Some(close_offset) = line[val_start..].find('"') else { return };
+        let Some(close_offset) = line[val_start..].find('"') else {
+            return;
+        };
         let value = &line[val_start..val_start + close_offset];
         out.push((canonical, value.to_string()));
         pos = val_start + close_offset + 1;

@@ -41,7 +41,9 @@ impl OwnershipIndex {
             return PackageOrigin::Unknown;
         };
         if let Some(pkg) = files.get(path) {
-            return PackageOrigin::Owned { package: pkg.clone() };
+            return PackageOrigin::Owned {
+                package: pkg.clone(),
+            };
         }
         PackageOrigin::Untracked
     }

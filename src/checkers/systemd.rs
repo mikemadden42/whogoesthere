@@ -34,7 +34,12 @@ impl Checker for SystemdChecker {
         let mut system_seen: HashSet<PathBuf> = HashSet::new();
 
         for dir in canonical_unique(SYSTEM_UNIT_DIRS) {
-            findings.extend(scan_unit_dir(&dir, &mut system_seen, Scope::System, "system"));
+            findings.extend(scan_unit_dir(
+                &dir,
+                &mut system_seen,
+                Scope::System,
+                "system",
+            ));
         }
         for dir in canonical_unique(GLOBAL_USER_UNIT_DIRS) {
             findings.extend(scan_unit_dir(
@@ -154,7 +159,9 @@ fn emit_service(unit: &Unit, source: &Path, scope: Scope, location: &str) -> Vec
     ];
     let mut findings = Vec::new();
     for key in exec_keys {
-        let Some(values) = svc.get(*key) else { continue };
+        let Some(values) = svc.get(*key) else {
+            continue;
+        };
         for value in values {
             let value = value.trim();
             if value.is_empty() {

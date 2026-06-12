@@ -89,7 +89,11 @@ fn parse_cron_line(line: &str, has_user: bool) -> Option<CronLine> {
         parts.join(" ")
     };
 
-    let user = if has_user { Some(iter.next()?.to_string()) } else { None };
+    let user = if has_user {
+        Some(iter.next()?.to_string())
+    } else {
+        None
+    };
     let command: Vec<&str> = iter.collect();
     if command.is_empty() {
         return None;

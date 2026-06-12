@@ -80,7 +80,9 @@ fn build_runlevel_map() -> HashMap<String, Vec<String>> {
     let mut map: HashMap<String, Vec<String>> = HashMap::new();
     for level in 0..=6 {
         let dir = format!("/etc/rc{level}.d");
-        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
         for entry in entries.flatten() {
             let fname = entry.file_name();
             let fname = fname.to_string_lossy();

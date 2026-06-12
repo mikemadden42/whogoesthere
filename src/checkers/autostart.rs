@@ -8,10 +8,7 @@ use crate::util::{canonical_unique, real_users};
 
 pub struct AutostartChecker;
 
-const SYSTEM_DIRS: &[&str] = &[
-    "/etc/xdg/autostart",
-    "/usr/xdg/autostart",
-];
+const SYSTEM_DIRS: &[&str] = &["/etc/xdg/autostart", "/usr/xdg/autostart"];
 
 impl Checker for AutostartChecker {
     fn name(&self) -> &'static str {
@@ -27,7 +24,10 @@ impl Checker for AutostartChecker {
 
         for user in real_users() {
             let dir = user.home.join(".config/autostart");
-            let scope = Scope::User { uid: user.uid, name: user.name };
+            let scope = Scope::User {
+                uid: user.uid,
+                name: user.name,
+            };
             findings.extend(scan_autostart_dir(&dir, scope));
         }
 

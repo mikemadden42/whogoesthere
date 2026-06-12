@@ -10,16 +10,44 @@ pub struct ShellChecker;
 
 const SYSTEM_FILES: &[(&str, &str, &str)] = &[
     ("posix", "/etc/profile", "login shell, system-wide"),
-    ("bash", "/etc/bash.bashrc", "bash interactive non-login, system-wide"),
-    ("bash", "/etc/bashrc", "bash interactive non-login, system-wide (RHEL/Fedora)"),
-    ("zsh", "/etc/zsh/zshenv", "zsh — every invocation, system-wide"),
+    (
+        "bash",
+        "/etc/bash.bashrc",
+        "bash interactive non-login, system-wide",
+    ),
+    (
+        "bash",
+        "/etc/bashrc",
+        "bash interactive non-login, system-wide (RHEL/Fedora)",
+    ),
+    (
+        "zsh",
+        "/etc/zsh/zshenv",
+        "zsh — every invocation, system-wide",
+    ),
     ("zsh", "/etc/zsh/zprofile", "zsh login, system-wide"),
     ("zsh", "/etc/zsh/zshrc", "zsh interactive, system-wide"),
-    ("zsh", "/etc/zsh/zlogin", "zsh login (after zshrc), system-wide"),
-    ("zsh", "/etc/zshenv", "zsh — every invocation, system-wide (alt path)"),
+    (
+        "zsh",
+        "/etc/zsh/zlogin",
+        "zsh login (after zshrc), system-wide",
+    ),
+    (
+        "zsh",
+        "/etc/zshenv",
+        "zsh — every invocation, system-wide (alt path)",
+    ),
     ("zsh", "/etc/zprofile", "zsh login, system-wide (alt path)"),
-    ("zsh", "/etc/zshrc", "zsh interactive, system-wide (alt path)"),
-    ("zsh", "/etc/zlogin", "zsh login (after zshrc), system-wide (alt path)"),
+    (
+        "zsh",
+        "/etc/zshrc",
+        "zsh interactive, system-wide (alt path)",
+    ),
+    (
+        "zsh",
+        "/etc/zlogin",
+        "zsh login (after zshrc), system-wide (alt path)",
+    ),
 ];
 
 const USER_FILES: &[(&str, &str, &str)] = &[
@@ -63,7 +91,10 @@ impl Checker for ShellChecker {
         }
 
         for user in real_users() {
-            let scope = Scope::User { uid: user.uid, name: user.name };
+            let scope = Scope::User {
+                uid: user.uid,
+                name: user.name,
+            };
             for (shell, rel, when) in USER_FILES {
                 let path = user.home.join(rel);
                 if let Some(f) = check_file(&path, shell, when, scope.clone()) {
@@ -94,4 +125,3 @@ fn check_file(path: &Path, shell: &str, when: &str, scope: Scope) -> Option<Find
         metadata,
     })
 }
-
