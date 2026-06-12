@@ -1,11 +1,10 @@
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::{Path, PathBuf};
-
-use uzers::os::unix::UserExt;
+use std::path::Path;
 
 use crate::checker::Checker;
 use crate::finding::{Finding, PackageOrigin, Scope};
+use crate::util::real_users;
 
 pub struct ShellChecker;
 
@@ -63,10 +62,10 @@ impl Checker for ShellChecker {
             }
         }
 
-        for (uid, name, home) in real_users() {
-            let scope = Scope::User { uid, name };
+        for user in real_users() {
+            let scope = Scope::User { uid: user.uid, name: user.name };
             for (shell, rel, when) in USER_FILES {
-                let path = home.join(rel);
+                let path = user.home.join(rel);
                 if let Some(f) = check_file(&path, shell, when, scope.clone()) {
                     findings.push(f);
                 }
@@ -96,24 +95,3 @@ fn check_file(path: &Path, shell: &str, when: &str, scope: Scope) -> Option<Find
     })
 }
 
-fn real_users() -> Vec<(u32, String, PathBuf)> {
-    // SAFETY: uzers::all_users wraps getpwent(), which is not thread-safe.
-    // knockknock is single-threaded, so this is fine.
-    let iter = unsafe { uzers::all_users() };
-    iter.filter(|u| {
-        let uid = u.uid();
-        uid == 0 || (1000..65534).contains(&uid)
-    })
-    .filter(|u| {
-        let shell = u.shell().to_string_lossy().to_string();
-        !shell.is_empty() && !shell.contains("nologin") && !shell.contains("false")
-    })
-    .map(|u| {
-        (
-            u.uid(),
-            u.name().to_string_lossy().to_string(),
-            u.home_dir().to_path_buf(),
-        )
-    })
-    .collect()
-}
