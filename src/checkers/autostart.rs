@@ -19,7 +19,7 @@ impl Checker for AutostartChecker {
         let mut findings = Vec::new();
 
         for dir in canonical_unique(SYSTEM_DIRS) {
-            findings.extend(scan_autostart_dir(&dir, Scope::System));
+            findings.extend(scan_autostart_dir(&dir, &Scope::System));
         }
 
         for user in real_users() {
@@ -28,14 +28,14 @@ impl Checker for AutostartChecker {
                 uid: user.uid,
                 name: user.name,
             };
-            findings.extend(scan_autostart_dir(&dir, scope));
+            findings.extend(scan_autostart_dir(&dir, &scope));
         }
 
         findings
     }
 }
 
-fn scan_autostart_dir(dir: &Path, scope: Scope) -> Vec<Finding> {
+fn scan_autostart_dir(dir: &Path, scope: &Scope) -> Vec<Finding> {
     let Ok(entries) = fs::read_dir(dir) else {
         return Vec::new();
     };
@@ -48,7 +48,7 @@ fn scan_autostart_dir(dir: &Path, scope: Scope) -> Vec<Finding> {
         let Ok(content) = fs::read_to_string(&path) else {
             continue;
         };
-        if let Some(f) = build_finding(&content, &path, scope.clone()) {
+        if let Some(f) = build_finding(&content, &path, scope) {
             findings.push(f);
         }
     }
@@ -108,7 +108,7 @@ fn parse_desktop(content: &str) -> DesktopEntry {
     entry
 }
 
-fn build_finding(content: &str, source: &Path, scope: Scope) -> Option<Finding> {
+fn build_finding(content: &str, source: &Path, scope: &Scope) -> Option<Finding> {
     let entry = parse_desktop(content);
     let exec = entry.exec?;
 
@@ -154,7 +154,7 @@ fn build_finding(content: &str, source: &Path, scope: Scope) -> Option<Finding> 
         mechanism: "XDG autostart .desktop entry".to_string(),
         source: source.to_path_buf(),
         target: Some(exec),
-        scope,
+        scope: scope.clone(),
         package: PackageOrigin::Unknown,
         metadata,
     })

@@ -273,9 +273,7 @@ fn scan_user_spool(spool: &Path) -> Vec<Finding> {
             continue;
         };
 
-        let uid = uzers::get_user_by_name(filename)
-            .map(|u| u.uid())
-            .unwrap_or(0);
+        let uid = uzers::get_user_by_name(filename).map_or(0, |u| u.uid());
         let scope = Scope::User {
             uid,
             name: filename.to_string(),

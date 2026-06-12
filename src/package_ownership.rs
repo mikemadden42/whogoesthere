@@ -34,7 +34,7 @@ impl OwnershipIndex {
     /// /usr/lib/... target is itself untracked, and that's exactly the kind
     /// of admin- or malware-installed entry we want to flag. Checkers that
     /// scan symlinked dir trees (e.g. /lib → /usr/lib) already canonicalize
-    /// at the directory level via util::canonical_unique, so the finding's
+    /// at the directory level via `util::canonical_unique`, so the finding's
     /// source path lands on the canonical entry the package registered.
     pub fn owner(&self, path: &Path) -> PackageOrigin {
         let Some(files) = &self.files else {
@@ -120,6 +120,5 @@ fn which(prog: &str) -> bool {
         .arg("-c")
         .arg(format!("command -v {prog}"))
         .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+        .is_ok_and(|o| o.status.success())
 }

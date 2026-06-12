@@ -41,9 +41,8 @@ fn scan_initd() -> Vec<Finding> {
         if !meta.is_file() {
             continue;
         }
-        let name = match path.file_name().and_then(|n| n.to_str()) {
-            Some(n) => n,
-            None => continue,
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
         };
         // Skip non-service files commonly found in init.d
         if name == "README" || name == "skeleton" || name.starts_with('.') {

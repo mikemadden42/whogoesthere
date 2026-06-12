@@ -37,7 +37,7 @@ impl Checker for SystemdChecker {
             findings.extend(scan_unit_dir(
                 &dir,
                 &mut system_seen,
-                Scope::System,
+                &Scope::System,
                 "system",
             ));
         }
@@ -45,7 +45,7 @@ impl Checker for SystemdChecker {
             findings.extend(scan_unit_dir(
                 &dir,
                 &mut system_seen,
-                Scope::System,
+                &Scope::System,
                 "user-global",
             ));
         }
@@ -57,7 +57,7 @@ impl Checker for SystemdChecker {
                 uid: user.uid,
                 name: user.name,
             };
-            findings.extend(scan_unit_dir(&dir, &mut user_seen, scope, "user-personal"));
+            findings.extend(scan_unit_dir(&dir, &mut user_seen, &scope, "user-personal"));
         }
 
         findings
@@ -67,7 +67,7 @@ impl Checker for SystemdChecker {
 fn scan_unit_dir(
     dir: &Path,
     seen: &mut HashSet<PathBuf>,
-    scope: Scope,
+    scope: &Scope,
     location: &'static str,
 ) -> Vec<Finding> {
     let Ok(entries) = fs::read_dir(dir) else {
@@ -90,7 +90,7 @@ fn scan_unit_dir(
             continue;
         };
         let unit = parse_ini(&content);
-        findings.extend(emit_findings(&unit, &path, ext, scope.clone(), location));
+        findings.extend(emit_findings(&unit, &path, ext, scope, location));
     }
     findings
 }
@@ -131,7 +131,7 @@ fn emit_findings(
     unit: &Unit,
     source: &Path,
     ext: &str,
-    scope: Scope,
+    scope: &Scope,
     location: &str,
 ) -> Vec<Finding> {
     match ext {
@@ -143,7 +143,7 @@ fn emit_findings(
     }
 }
 
-fn emit_service(unit: &Unit, source: &Path, scope: Scope, location: &str) -> Vec<Finding> {
+fn emit_service(unit: &Unit, source: &Path, scope: &Scope, location: &str) -> Vec<Finding> {
     let Some(svc) = unit.get("Service") else {
         return Vec::new();
     };
@@ -190,7 +190,7 @@ fn emit_service(unit: &Unit, source: &Path, scope: Scope, location: &str) -> Vec
     findings
 }
 
-fn emit_timer(unit: &Unit, source: &Path, scope: Scope, location: &str) -> Vec<Finding> {
+fn emit_timer(unit: &Unit, source: &Path, scope: &Scope, location: &str) -> Vec<Finding> {
     let Some(tmr) = unit.get("Timer") else {
         return Vec::new();
     };
@@ -218,13 +218,13 @@ fn emit_timer(unit: &Unit, source: &Path, scope: Scope, location: &str) -> Vec<F
         mechanism: format!("systemd timer ({location})"),
         source: source.to_path_buf(),
         target: Some(bits.join("; ")),
-        scope,
+        scope: scope.clone(),
         package: PackageOrigin::Unknown,
         metadata,
     }]
 }
 
-fn emit_path(unit: &Unit, source: &Path, scope: Scope, location: &str) -> Vec<Finding> {
+fn emit_path(unit: &Unit, source: &Path, scope: &Scope, location: &str) -> Vec<Finding> {
     let Some(p) = unit.get("Path") else {
         return Vec::new();
     };
@@ -248,13 +248,13 @@ fn emit_path(unit: &Unit, source: &Path, scope: Scope, location: &str) -> Vec<Fi
         mechanism: format!("systemd path watcher ({location})"),
         source: source.to_path_buf(),
         target: Some(bits.join("; ")),
-        scope,
+        scope: scope.clone(),
         package: PackageOrigin::Unknown,
         metadata,
     }]
 }
 
-fn emit_socket(unit: &Unit, source: &Path, scope: Scope, location: &str) -> Vec<Finding> {
+fn emit_socket(unit: &Unit, source: &Path, scope: &Scope, location: &str) -> Vec<Finding> {
     let Some(s) = unit.get("Socket") else {
         return Vec::new();
     };
@@ -281,7 +281,7 @@ fn emit_socket(unit: &Unit, source: &Path, scope: Scope, location: &str) -> Vec<
         mechanism: format!("systemd socket activation ({location})"),
         source: source.to_path_buf(),
         target: Some(bits.join("; ")),
-        scope,
+        scope: scope.clone(),
         package: PackageOrigin::Unknown,
         metadata,
     }]
