@@ -25,7 +25,7 @@ impl OwnershipIndex {
             PackageManager::Rpm => build_rpm_index(),
             PackageManager::None => None,
         };
-        OwnershipIndex { files }
+        Self { files }
     }
 
     /// Returns the package that owns `path`, or `Untracked` if no package

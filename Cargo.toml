@@ -2,7 +2,11 @@
 name = "whogoesthere"
 version = "0.1.0"
 edition = "2024"
-description = "Linux persistence enumeration"
+description = "Linux persistence enumeration with package-ownership attribution"
+license = "MIT"
+repository = "https://github.com/mikemadden42/whogoesthere"
+keywords = ["security", "persistence", "linux", "audit", "forensics"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 anyhow = "1"
