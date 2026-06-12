@@ -7,7 +7,7 @@ use crate::finding::PackageOrigin;
 
 /// One-shot index of every package-owned file on the system. Built once at
 /// startup so that per-finding ownership lookups are O(1) hash hits instead
-/// of `rpm -qf` / `dpkg -S` forks.
+/// of `rpm -qf` / `dpkg -S` / `pacman -Qo` forks.
 pub struct OwnershipIndex {
     files: Option<HashMap<PathBuf, String>>,
 }
@@ -15,6 +15,7 @@ pub struct OwnershipIndex {
 enum PackageManager {
     Dpkg,
     Rpm,
+    Pacman,
     None,
 }
 
@@ -23,6 +24,7 @@ impl OwnershipIndex {
         let files = match detect() {
             PackageManager::Dpkg => build_dpkg_index(),
             PackageManager::Rpm => build_rpm_index(),
+            PackageManager::Pacman => build_pacman_index(),
             PackageManager::None => None,
         };
         Self { files }
@@ -54,6 +56,8 @@ fn detect() -> PackageManager {
         PackageManager::Dpkg
     } else if which("rpm") {
         PackageManager::Rpm
+    } else if which("pacman") {
+        PackageManager::Pacman
     } else {
         PackageManager::None
     }
@@ -110,6 +114,44 @@ fn build_dpkg_index() -> Option<HashMap<PathBuf, String>> {
                 continue;
             }
             map.insert(PathBuf::from(line), pkg.clone());
+        }
+    }
+    if map.is_empty() { None } else { Some(map) }
+}
+
+/// pacman: every installed package has its own directory under
+/// `/var/lib/pacman/local/<pkgname>-<version>-<release>/`. The `files`
+/// sub-file lists owned paths after a `%FILES%` header, one per line,
+/// relative to `/` — prepend a leading slash to get an absolute path.
+/// Other section headers (e.g. `%BACKUP%`) may appear and gate `in_files`
+/// off. Uses the directory name verbatim as the package identifier,
+/// matching what `pacman -Qo` reports.
+fn build_pacman_index() -> Option<HashMap<PathBuf, String>> {
+    let local = Path::new("/var/lib/pacman/local");
+    let entries = fs::read_dir(local).ok()?;
+    let mut map: HashMap<PathBuf, String> = HashMap::new();
+    for entry in entries.flatten() {
+        let dir = entry.path();
+        let Some(pkg) = dir.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let Ok(content) = fs::read_to_string(dir.join("files")) else {
+            continue;
+        };
+        let mut in_files = false;
+        for line in content.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            if line.starts_with('%') && line.ends_with('%') {
+                in_files = line == "%FILES%";
+                continue;
+            }
+            if !in_files {
+                continue;
+            }
+            map.insert(PathBuf::from(format!("/{line}")), pkg.to_string());
         }
     }
     if map.is_empty() { None } else { Some(map) }

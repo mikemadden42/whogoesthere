@@ -70,8 +70,8 @@ cargo run --release -- --format json | jq '[.[] | select(.package.status == "unt
 
 A full run on Fedora 44 (1343 findings across all eight checkers) takes
 ~0.76s. Package-ownership attribution is the hot path; it's done once at
-startup by ingesting the entire `rpm`/`dpkg` file index into a hash map,
-then served as O(1) lookups against each finding's source path.
+startup by ingesting the entire `rpm` / `dpkg` / `pacman` file index into
+a hash map, then served as O(1) lookups against each finding's source path.
 
 ## Building a single static binary
 

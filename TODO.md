@@ -24,6 +24,11 @@
       match `dpkg -S`) but never exercised on real data. Check: total finding
       count, UNTRACKED count looks sane, dpkg-diverted paths aren't producing
       noisy false-UNTRACKEDs.
+- [ ] Smoke-test the pacman branch of the package-ownership cache on a real
+      Arch box. Same caveat as dpkg — code is written against documented
+      `/var/lib/pacman/local/*/files` layout but unverified. Check that
+      `%FILES%`-section parsing is correct, total/UNTRACKED counts are sane,
+      and that the directory-name-as-pkgid format reads cleanly in output.
 - [ ] Check snap-generated systemd units on Ubuntu. They live in
       `/etc/systemd/system/` and may all show as UNTRACKED because snapd
       synthesizes them rather than dpkg-installing them. A pattern filter for
@@ -40,10 +45,12 @@ returns `PackageManager::None` and every finding gets `PackageOrigin::Unknown`
 ROI for adding more:
 
 ### Worth adding
-- [ ] **Arch (pacman)**. Significant userbase, conventional package model
-      fits the cache approach directly. Pre-scan from
-      `/var/lib/pacman/local/*/files` (one dir per installed package,
-      `files` sub-file lists owned paths). ~30 LoC, mirror the dpkg branch.
+- [x] **Arch (pacman).** *Code-complete, unverified on real Arch.* Pre-scan
+      walks `/var/lib/pacman/local/<pkg>-<ver>-<rel>/files`, reads the
+      `%FILES%` section (one relative path per line; leading `/` prepended),
+      and uses the directory name verbatim as the package identifier (so
+      output matches `pacman -Qo`). Needs the same smoke-test treatment as
+      the dpkg branch on a real Arch box.
 
 ### Worth considering (containers/cloud)
 - [ ] **Alpine (apk)**. Small distro but ubiquitous in Docker. Package DB
