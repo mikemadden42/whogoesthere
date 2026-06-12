@@ -1,5 +1,81 @@
 # whogoesthere TODO
 
+## Known bugs & correctness gaps
+
+- [x] **dpkg attribution breaks on merged-`/usr` systems (high severity).**
+      *Fixed.* On modern Debian/Ubuntu, `/lib`, `/bin`, `/sbin` are symlinks into
+      `/usr/lib`, etc. dpkg records the *unmerged* spelling in its `.list`
+      files (e.g. `/lib/systemd/system/rsyslog.service`), so the ownership
+      index is keyed under `/lib/...`. But checkers scan unit/rule dirs
+      through `util::canonical_unique`, which resolves the symlink, so a
+      finding's `source` is the *merged* spelling (`/usr/lib/systemd/system/
+      rsyslog.service`). `OwnershipIndex::owner` does a literal `HashMap`
+      lookup, the two spellings never match, and every package-shipped file
+      under `/usr/{lib,bin,sbin}` is misreported `UNTRACKED`.
+      Impact: on a stock Ubuntu test run, ~956 of 1019 UNTRACKED findings
+      were false positives (clustered under `/usr/lib/systemd/system` and
+      `/usr/lib/udev/rules.d`) — only ~60 were genuinely unowned. This
+      drowns the primary malware signal. rpm is unaffected because Fedora's
+      rpm DB already stores the canonical `/usr/...` spelling, which is why
+      the README's clean Fedora run never surfaced it. (See git
+      `371d2dd Flag dpkg cache as unverified on real Debian data`.)
+      Fix: normalize both sides into one namespace. Preferred approach —
+      in `build_dpkg_index`, detect merged-`/usr` once (is `/lib` a
+      symlink?) and insert each path under *both* its raw spelling and its
+      `/lib→/usr/lib`, `/bin→/usr/bin`, `/sbin→/usr/sbin` rewrite, so
+      lookups hit regardless of which spelling a finding carries. Cheaper
+      than per-file `canonicalize()` (no extra syscalls) and stays correct
+      on non-merged systems. Verify by re-running on a merged box and
+      confirming the UNTRACKED count collapses to the genuinely-unowned set.
+      *Result: on this Ubuntu box UNTRACKED dropped 1019 → 73 (total findings
+      unchanged at 1288); under `/usr/lib/systemd/system`, 414 now attributed
+      vs 11 genuinely unowned. Unit-tested in `package_ownership::tests`.*
+- [ ] **`detect()` picks a single package-manager backend, first match wins**
+      (`package_ownership.rs`). On a host with both `dpkg` and `rpm`
+      installed, only dpkg-owned files get attributed; every rpm-owned file
+      falls through to `UNTRACKED`. Rare, but it produces false positives in
+      exactly the signal that matters. Consider building all available
+      backends and merging their indices, or at least documenting the
+      first-match behavior.
+- [ ] **Unreadable files are silently flagged as findings with no indication
+      they couldn't be read.** Several checkers (`shell`, `init`) stat a file,
+      emit a finding, then later read its contents — but when run unprivileged
+      against a `0600 root:root` file, the metadata-only finding still appears
+      with an empty `target` and no note. On the Ubuntu test run,
+      `/etc/profile.d/{debuginfod,tmout}.sh` (both `0600`, both unowned)
+      surfaced this way. Add an `unreadable: true` metadata flag (or similar)
+      so the output distinguishes "empty/no target" from "couldn't read —
+      rerun as root."
+- [ ] **`which()` shells out per probe** (`package_ownership.rs`) via
+      `sh -c "command -v <prog>"`. Works, but a direct `$PATH` scan would drop
+      the shell dependency. Low priority — `prog` is always a hardcoded literal
+      today, so there's no injection surface.
+- [ ] **`autostart::SYSTEM_DIRS` includes `/usr/xdg/autostart`**, which is not
+      a standard XDG path (the real one is `/etc/xdg/autostart`). Harmless — it
+      just no-ops — but it's dead config worth removing or documenting.
+- [ ] **`real_users()` scopes to root + UID 1000–65533**, deliberately skipping
+      system accounts (1–999). Those can still own dotfile/crontab persistence
+      if they have a real login shell. Reasonable default, but undocumented —
+      add a comment noting the exclusion is intentional.
+
+## Testing
+
+- [ ] **No unit tests exist anywhere in the tree.** The entire value of the
+      tool is parser correctness, and the riskiest logic is exactly the
+      parsing — all pure functions over `&str`, ideal for table-driven tests
+      with zero filesystem dependency. A silent parser regression produces
+      *wrong attribution* in a security tool, which is worse than a crash.
+      Highest-value targets:
+      - `udev::extract_with_prefixes` — manual byte-scanning with
+        earliest-match-wins prefix selection; subtle and completely
+        unexercised.
+      - `cron::parse_cron_line` — field counting, `@reboot` vs 5-field
+        schedules, env-var-line skipping, presence/absence of the user field.
+      - `systemd::parse_ini` and the timer/path/socket activation-resolution
+        logic (`activated_unit_name`).
+      - `package_ownership` dpkg/pacman/rpm index parsers — three of these are
+        already flagged "unverified on real data" elsewhere in this file.
+
 ## Performance
 
 - [x] Cache package ownership lookups. *Done.* Pre-scan via
@@ -102,4 +178,7 @@ ROI for adding more:
       the persistence-relevant keys but technically valid syntax.
 - [ ] udev rule line continuation (`\` at EOL) likewise unhandled.
 - [ ] systemd drop-in dirs (`<unit>.d/*.conf`) are not walked — a malicious
-      override that adds `ExecStart` via a drop-in would be missed.
+      override that adds `ExecStart` via a drop-in would be missed. NOTE: this
+      is a genuine *detection blind spot*, not a cosmetic parser nicety — it's
+      arguably the most security-relevant gap in this file and deserves
+      promotion above the line-continuation items.

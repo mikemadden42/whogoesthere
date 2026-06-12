@@ -95,6 +95,7 @@ fn build_rpm_index() -> Option<HashMap<PathBuf, String>> {
 fn build_dpkg_index() -> Option<HashMap<PathBuf, String>> {
     let info = Path::new("/var/lib/dpkg/info");
     let entries = fs::read_dir(info).ok()?;
+    let merged = is_merged_usr();
     let mut map: HashMap<PathBuf, String> = HashMap::new();
     for entry in entries.flatten() {
         let path = entry.path();
@@ -113,10 +114,41 @@ fn build_dpkg_index() -> Option<HashMap<PathBuf, String>> {
             if line.is_empty() {
                 continue;
             }
-            map.insert(PathBuf::from(line), pkg.clone());
+            let owned = PathBuf::from(line);
+            // On merged-/usr systems dpkg records the unmerged spelling
+            // (/lib/...), but checkers canonicalize finding sources to the
+            // merged spelling (/usr/lib/...). Key under both so lookups hit
+            // regardless of which form the finding carries.
+            if merged && let Some(rewritten) = merged_usr_rewrite(&owned) {
+                map.insert(rewritten, pkg.clone());
+            }
+            map.insert(owned, pkg.clone());
         }
     }
     if map.is_empty() { None } else { Some(map) }
+}
+
+/// True on merged-`/usr` systems, where `/lib` is a symlink into `/usr/lib`
+/// (likewise `/bin`, `/sbin`). Checked via `symlink_metadata` so the symlink
+/// itself is inspected rather than its target.
+fn is_merged_usr() -> bool {
+    Path::new("/lib")
+        .symlink_metadata()
+        .is_ok_and(|m| m.file_type().is_symlink())
+}
+
+/// Rewrite an unmerged path (`/lib/...`, `/bin/...`, `/sbin/...`) to its
+/// merged-`/usr` spelling (`/usr/lib/...`, etc.), matching what
+/// `Path::canonicalize` produces for finding sources on a merged system.
+/// Returns `None` for paths that don't live under one of those dirs.
+fn merged_usr_rewrite(path: &Path) -> Option<PathBuf> {
+    let s = path.to_str()?;
+    for prefix in ["/lib/", "/bin/", "/sbin/"] {
+        if let Some(rest) = s.strip_prefix(prefix) {
+            return Some(PathBuf::from(format!("/usr{prefix}{rest}")));
+        }
+    }
+    None
 }
 
 /// pacman: every installed package has its own directory under
@@ -163,4 +195,35 @@ fn which(prog: &str) -> bool {
         .arg(format!("command -v {prog}"))
         .output()
         .is_ok_and(|o| o.status.success())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rewrites_merged_usr_dirs() {
+        assert_eq!(
+            merged_usr_rewrite(Path::new("/lib/systemd/system/rsyslog.service")),
+            Some(PathBuf::from("/usr/lib/systemd/system/rsyslog.service"))
+        );
+        assert_eq!(
+            merged_usr_rewrite(Path::new("/bin/ls")),
+            Some(PathBuf::from("/usr/bin/ls"))
+        );
+        assert_eq!(
+            merged_usr_rewrite(Path::new("/sbin/init")),
+            Some(PathBuf::from("/usr/sbin/init"))
+        );
+    }
+
+    #[test]
+    fn leaves_non_merged_paths_alone() {
+        assert_eq!(merged_usr_rewrite(Path::new("/etc/crontab")), None);
+        assert_eq!(merged_usr_rewrite(Path::new("/usr/lib/foo")), None);
+        assert_eq!(merged_usr_rewrite(Path::new("/var/spool/cron")), None);
+        // The dir symlinks themselves (no trailing slash) are not rewritten —
+        // only paths *under* them, which is what dpkg .list entries are.
+        assert_eq!(merged_usr_rewrite(Path::new("/lib")), None);
+    }
 }
