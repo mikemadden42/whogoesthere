@@ -34,7 +34,7 @@ pub struct RealUser {
 /// Skips daemons, nologin accounts, and system users.
 pub fn real_users() -> Vec<RealUser> {
     // SAFETY: uzers::all_users wraps getpwent(), which is not thread-safe.
-    // knockknock is single-threaded, so this is fine.
+    // whogoesthere is single-threaded, so this is fine.
     let iter = unsafe { uzers::all_users() };
     iter.filter(|u| {
         let uid = u.uid();

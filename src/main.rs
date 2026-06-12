@@ -10,7 +10,7 @@ use crate::checker::Checker;
 use crate::finding::{Finding, PackageOrigin, Scope};
 
 #[derive(Parser)]
-#[command(name = "knockknock", about = "Linux persistence enumeration")]
+#[command(name = "whogoesthere", about = "Linux persistence enumeration")]
 struct Cli {
     #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
     format: OutputFormat,

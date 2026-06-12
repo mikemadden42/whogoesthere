@@ -1,7 +1,9 @@
-# knockknock
+# whogoesthere
 
-Linux persistence enumeration. A port of Patrick Wardle's macOS
-[KnockKnock](https://objective-see.org/products/knockknock.html) to Linux.
+Linux persistence enumeration. Inspired by Patrick Wardle's macOS
+[KnockKnock](https://objective-see.org/products/knockknock.html), but
+re-thought from the ground up for Linux's very different persistence
+surface (systemd, cron, init, dotfiles, udev — not LaunchAgents and kexts).
 
 Surveys the high-value persistence vectors on a host and lists what's
 installed at each one, with **package-ownership attribution** so that
@@ -69,7 +71,7 @@ cargo run --release -- --format json | jq '[.[] | select(.package.status == "unt
 ```sh
 rustup target add x86_64-unknown-linux-musl
 cargo build --release --target x86_64-unknown-linux-musl
-# binary: target/x86_64-unknown-linux-musl/release/knockknock
+# binary: target/x86_64-unknown-linux-musl/release/whogoesthere
 ```
 
 The release profile is configured with LTO + single codegen unit + symbol
@@ -84,8 +86,9 @@ backlog: package-ownership caching (12× speedup), distro coverage,
 PAM, D-Bus, dynamic linker, display manager, dispatcher scripts,
 package-manager hooks).
 
-## Why a port, not a rewrite of KnockKnock?
+## Why the name?
 
-The original is macOS-only — it understands LaunchAgents, LaunchDaemons,
-kexts, login items, etc. Linux's persistence surface is entirely different
-(systemd, cron, init, dotfiles, udev). Same idea, different mechanisms.
+`whogoesthere` is the sentry's challenge — same idea as KnockKnock (who's
+at the door?) but it's its own tool with its own scope, not a port. The
+name also avoids collisions with the existing macOS KnockKnock binary if
+both ever sit on the same machine.
