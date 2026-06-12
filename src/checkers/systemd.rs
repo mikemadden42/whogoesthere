@@ -313,10 +313,10 @@ fn base_metadata(unit: &Unit, location: &str) -> BTreeMap<String, String> {
     }
     if let Some(install) = unit.get("Install") {
         for (key, lower) in &[("WantedBy", "wanted_by"), ("RequiredBy", "required_by")] {
-            if let Some(vals) = install.get(*key) {
-                if !vals.is_empty() {
-                    m.insert(lower.to_string(), vals.join(", "));
-                }
+            if let Some(vals) = install.get(*key)
+                && !vals.is_empty()
+            {
+                m.insert(lower.to_string(), vals.join(", "));
             }
         }
     }

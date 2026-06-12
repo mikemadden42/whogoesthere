@@ -80,12 +80,11 @@ impl Checker for ShellChecker {
         if let Ok(entries) = fs::read_dir("/etc/profile.d") {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.extension().and_then(|e| e.to_str()) == Some("sh") {
-                    if let Some(f) =
+                if path.extension().and_then(|e| e.to_str()) == Some("sh")
+                    && let Some(f) =
                         check_file(&path, "posix", "sourced by /etc/profile", Scope::System)
-                    {
-                        findings.push(f);
-                    }
+                {
+                    findings.push(f);
                 }
             }
         }

@@ -124,23 +124,23 @@ fn build_finding(content: &str, source: &Path, scope: Scope) -> Option<Finding> 
     }
     // Highlight effective-disabled state, since the file is still
     // present and could be re-enabled by editing one line.
-    if let Some(h) = entry.hidden {
-        if h.eq_ignore_ascii_case("true") {
-            metadata.insert("disabled_by".to_string(), "Hidden=true".to_string());
-        }
+    if let Some(h) = entry.hidden
+        && h.eq_ignore_ascii_case("true")
+    {
+        metadata.insert("disabled_by".to_string(), "Hidden=true".to_string());
     }
-    if let Some(e) = entry.autostart_enabled {
-        if e.eq_ignore_ascii_case("false") {
-            metadata.insert(
-                "disabled_by".to_string(),
-                "X-GNOME-Autostart-enabled=false".to_string(),
-            );
-        }
+    if let Some(e) = entry.autostart_enabled
+        && e.eq_ignore_ascii_case("false")
+    {
+        metadata.insert(
+            "disabled_by".to_string(),
+            "X-GNOME-Autostart-enabled=false".to_string(),
+        );
     }
-    if let Some(n) = entry.no_display {
-        if n.eq_ignore_ascii_case("true") {
-            metadata.insert("no_display".to_string(), "true".to_string());
-        }
+    if let Some(n) = entry.no_display
+        && n.eq_ignore_ascii_case("true")
+    {
+        metadata.insert("no_display".to_string(), "true".to_string());
     }
     if let Some(o) = entry.only_show_in {
         metadata.insert("only_show_in".to_string(), o);
