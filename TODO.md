@@ -31,6 +31,41 @@
 - [ ] Run against Alpine (OpenRC, no systemd). Most checkers should
       gracefully no-op; verify nothing panics.
 
+## Package-manager backends (beyond rpm/dpkg)
+
+The package-ownership cache currently has two backends: rpm (via `rpm -qa`)
+and dpkg (via `/var/lib/dpkg/info/*.list`). On any other distro, `detect()`
+returns `PackageManager::None` and every finding gets `PackageOrigin::Unknown`
+— the tool still surveys persistence, it just can't attribute. Tiered by
+ROI for adding more:
+
+### Worth adding
+- [ ] **Arch (pacman)**. Significant userbase, conventional package model
+      fits the cache approach directly. Pre-scan from
+      `/var/lib/pacman/local/*/files` (one dir per installed package,
+      `files` sub-file lists owned paths). ~30 LoC, mirror the dpkg branch.
+
+### Worth considering (containers/cloud)
+- [ ] **Alpine (apk)**. Small distro but ubiquitous in Docker. Package DB
+      at `/lib/apk/db/installed` is a single concatenated file with `F:`
+      lines for files (relative to current `P:`/`o:` package). Slightly
+      different parser but cheap. Pairs with the existing "Run against
+      Alpine" TODO under Distro coverage.
+
+### Awkward fit — likely skip or detect-and-bail
+- [ ] **NixOS**. Fundamentally different model: everything in `/nix/store`
+      is package-owned by definition, and most config paths are symlinks
+      into the store. `UNTRACKED` either fires on nothing or everything,
+      depending on whether we resolve symlinks. Real malware persistence
+      on NixOS lives in `configuration.nix` evaluation — a different
+      problem entirely. Better to detect `/nix/store` and warn that
+      whogoesthere's model doesn't apply, than to half-support it.
+
+### Long tail (low ROI, skip unless asked)
+- [ ] Gentoo (`/var/db/pkg/<cat>/<pkg>/CONTENTS`), Void Linux (xbps under
+      `/var/db/xbps/`), Slackware (`/var/lib/pkgtools/packages/`). Each
+      needs a bespoke parser; small userbases.
+
 ## Noise reduction & output
 
 - [ ] Built-in allowlist for the Fedora `dbus-org.*` activation aliases under
