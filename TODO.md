@@ -146,8 +146,13 @@
       docker → docker-ce, open-iscsi → open-iscsi, samba → samba, etc.). The
       runlevel cross-reference via `build_runlevel_map` also resolves
       correctly on this distro. Zero UNTRACKED in the init category.*
-- [ ] Verify per-user crontabs on Debian. The `/var/spool/cron/crontabs/` path
-      is supported in code but unexercised on this baseline.
+- [x] Verify per-user crontabs on Debian. The `/var/spool/cron/crontabs/`
+      path is supported in code but unexercised on this baseline.
+      *Validated.* The Ubuntu 24.04 capture exercises this path: the
+      cron checker walks both `/var/spool/cron` and
+      `/var/spool/cron/crontabs` via `USER_SPOOLS`, and the capture
+      shows expected per-user crontab findings emerging from the
+      Debian-style layout with no parsing errors.
 - [ ] Smoke-test the dpkg branch of the package-ownership cache on a real
       Debian/Ubuntu box. Coded against the standard `/var/lib/dpkg/info/*.list`
       layout (one absolute path per line, `:arch` stripped from filename to
@@ -600,9 +605,12 @@ ROI for adding more:
 
 ## Style / cosmetic
 
-- [ ] **`is_fedora_dbus_alias` is named Fedora-specific but the pattern likely
-      generalizes** (`src/package_ownership.rs:75`). D-Bus activation aliases
-      at `/etc/systemd/{system,user}/dbus-org.*.service` aren't unique to
-      Fedora. Once Debian/Arch baselines are taken, either confirm the same
-      shape and rename to `is_dbus_activation_alias`, or document the
-      distro-specificity in the function comment.
+- [x] **`is_fedora_dbus_alias` is named Fedora-specific but the pattern likely
+      generalizes** (`src/package_ownership.rs:75`). *Done — implicitly
+      addressed when the discriminator was generalized.* `is_fedora_dbus_alias`
+      was replaced by `is_systemd_enable_symlink_candidate`, which is named
+      for the broader pattern it actually recognizes (any
+      `/etc/systemd/{system,user}/<name>.{service,timer,path,socket}` enable
+      symlink), not specifically the Fedora dbus-org case. The Ubuntu 24.04
+      capture confirmed the same shape — `sshd.service`, `samba.service`,
+      `iscsi.service`, etc. — applies to Debian-family hosts too.
