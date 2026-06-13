@@ -71,6 +71,7 @@ fn main() -> anyhow::Result<()> {
         Box::new(checkers::ssh::SshChecker),
         Box::new(checkers::dbus::DbusChecker),
         Box::new(checkers::network_manager::NetworkManagerChecker),
+        Box::new(checkers::display_manager::DisplayManagerChecker),
     ];
 
     if cli.list_checkers {

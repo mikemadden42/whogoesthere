@@ -443,8 +443,34 @@ ROI for adding more:
       include, and the comment/blank skip path via a synthetic temp file.
       On this Fedora box: 5 ld_so findings total, all package-attributed,
       zero UNTRACKED — clean baseline.
-- [ ] Display-manager session hooks: gdm/sddm/lightdm Xsession scripts;
-      `~/.xsession`, `~/.xinitrc`, `~/.xprofile`.
+- [x] Display-manager session hooks: gdm/sddm/lightdm Xsession scripts;
+      `~/.xsession`, `~/.xinitrc`, `~/.xprofile`. *Done — promoted into
+      the v1 checker matrix.* New `display_manager` checker emits one
+      finding per file across three families:
+        * Per-user dotfiles (Scope::User): `~/.xprofile`, `~/.xsession`,
+          `~/.xinitrc`, `~/.xsessionrc`. `dm` metadata deliberately
+          omitted — these are read by multiple DMs.
+        * System DM hooks (Scope::System): `/etc/X11/xinit/xinitrc`
+          (`dm: xinit`), `/etc/X11/Xsession` (`dm: xsession`),
+          `/etc/lightdm/Xsession` (`dm: lightdm`),
+          `/etc/gdm/PostLogin/Default` + `/etc/gdm/PreSession/Default`
+          (`dm: gdm`).
+        * System sourced-fragment dirs: `/etc/X11/Xsession.d/*` with
+          dotfile + `*~` editor-backup skip rules. Each fragment is
+          sourced at session start by `/etc/X11/Xsession`.
+      Metadata: `size_bytes`, `executable` (bool), `dm` (when known),
+      `unreadable` marker when current user can't open the file. Live
+      Fedora 44: 2 findings surfaced — `/etc/X11/xinit/xinitrc` →
+      `xorg-x11-xinit` and `/etc/X11/Xsession.d/90xbrlapi` → `brltty`
+      (a braille-display install hook, benign but exactly the vector
+      this checker is built to catch). Zero new UNTRACKED. Total
+      findings 1723 → 1725. 5 unit tests via tempdirs cover the basic
+      finding path with dm metadata, the per-user `dm`-omitted path,
+      zero-byte / missing rejection, sourced-fragment dir scan with
+      backup/dotfile skip, and the missing-directory no-op. SDDM
+      `*.conf` settings + per-DM `*.conf.d/` overrides deliberately
+      excluded for v1 — those are configuration, not script
+      persistence, a different vector class.
 - [x] NetworkManager dispatcher scripts: `/etc/NetworkManager/dispatcher.d/`.
       *Done — promoted into the v1 checker matrix.* New `network_manager`
       checker walks the main `dispatcher.d/` body plus the three phase

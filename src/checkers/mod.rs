@@ -1,6 +1,7 @@
 pub mod autostart;
 pub mod cron;
 pub mod dbus;
+pub mod display_manager;
 pub mod init;
 pub mod ld_so;
 pub mod modules;
