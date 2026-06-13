@@ -37,15 +37,15 @@
       exactly the signal that matters. Consider building all available
       backends and merging their indices, or at least documenting the
       first-match behavior.
-- [ ] **Unreadable files are silently flagged as findings with no indication
-      they couldn't be read.** Several checkers (`shell`, `init`) stat a file,
-      emit a finding, then later read its contents — but when run unprivileged
-      against a `0600 root:root` file, the metadata-only finding still appears
-      with an empty `target` and no note. On the Ubuntu test run,
-      `/etc/profile.d/{debuginfod,tmout}.sh` (both `0600`, both unowned)
-      surfaced this way. Add an `unreadable: true` metadata flag (or similar)
-      so the output distinguishes "empty/no target" from "couldn't read —
-      rerun as root."
+- [x] **Unreadable files are silently flagged as findings with no indication
+      they couldn't be read.** *Fixed.* `shell::check_file`,
+      `init::scan_initd`, and `init::scan_rc_local` now probe readability via
+      `fs::File::open()` after the stat-based finding is built. If the open
+      fails, an `unreadable: rerun as root to inspect` metadata key is added,
+      so a `0600 root:root` file like `/etc/profile.d/debuginfod.sh` running
+      unprivileged is no longer indistinguishable from a benign empty
+      finding. `scan_inittab` already reads content directly and returns no
+      findings on failure — separate bug, out of scope here.
 - [ ] **`which()` shells out per probe** (`package_ownership.rs`) via
       `sh -c "command -v <prog>"`. Works, but a direct `$PATH` scan would drop
       the shell dependency. Low priority — `prog` is always a hardcoded literal

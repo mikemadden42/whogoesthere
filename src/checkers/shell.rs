@@ -114,6 +114,12 @@ fn check_file(path: &Path, shell: &str, when: &str, scope: Scope) -> Option<Find
     let mut metadata = BTreeMap::new();
     metadata.insert("shell".to_string(), shell.to_string());
     metadata.insert("size_bytes".to_string(), meta.len().to_string());
+    if fs::File::open(path).is_err() {
+        metadata.insert(
+            "unreadable".to_string(),
+            "rerun as root to inspect".to_string(),
+        );
+    }
     Some(Finding {
         category: "shell",
         mechanism: when.to_string(),

@@ -57,6 +57,12 @@ fn scan_initd() -> Vec<Finding> {
         if let Some(rls) = runlevel_map.get(name) {
             metadata.insert("enabled".to_string(), rls.join(", "));
         }
+        if fs::File::open(&path).is_err() {
+            metadata.insert(
+                "unreadable".to_string(),
+                "rerun as root to inspect".to_string(),
+            );
+        }
 
         findings.push(Finding {
             category: "init",
@@ -119,6 +125,12 @@ fn scan_rc_local() -> Option<Finding> {
         metadata.insert(
             "note".to_string(),
             "non-executable — present but won't run at boot".to_string(),
+        );
+    }
+    if fs::File::open(path).is_err() {
+        metadata.insert(
+            "unreadable".to_string(),
+            "rerun as root to inspect".to_string(),
         );
     }
 
