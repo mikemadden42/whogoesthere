@@ -98,7 +98,49 @@ impl OwnershipIndex {
             None
         }
     }
+
+    /// For files that a Debian/Ubuntu package's postinst script creates (and
+    /// that dpkg therefore doesn't track in `.list`), attribute through to the
+    /// known owning package. Returns the package name as a `&'static str` —
+    /// the allowlist is a static table. A finding is only reattributed if it
+    /// reached this pass as `Untracked`, so a malicious file that *is* in some
+    /// package's `.list` (genuine ownership) is unaffected. The attribution is
+    /// best understood as "this file is known to be associated with package X
+    /// via its postinst" — same semantic as dpkg/rpm file ownership, which
+    /// also doesn't validate contents.
+    ///
+    /// Catalogued cases (all diagnosed on Ubuntu 24.04):
+    ///   * `/etc/profile` ← base-files postinst
+    ///   * `/etc/pam.d/common-{auth,account,password,session,
+    ///     session-noninteractive}` ← libpam-runtime via `pam-auth-update`
+    ///   * `/etc/modules` ← kmod postinst (initramfs-tools on older releases)
+    pub fn resolve_postinst_allowlist(&self, path: &Path) -> Option<&'static str> {
+        // Gate on having a real package backend — on a host where `detect()`
+        // returned None, fabricating package names is wrong.
+        self.files.as_ref()?;
+        POSTINST_ALLOWLIST
+            .iter()
+            .find(|(p, _)| Path::new(p) == path)
+            .map(|(_, pkg)| *pkg)
+    }
 }
+
+/// Path → owning package for files known to be created by dpkg postinst
+/// scripts. dpkg's `.list` only records archive-unpacked files; postinst
+/// output is invisible to `dpkg-query -S`. rpm includes scriptlet-created
+/// files in its database, which is why this allowlist is dpkg-specific in
+/// practice — on rpm-based hosts these paths either don't exist (PAM
+/// `common-*`, `/etc/modules`) or are correctly attributed via the file
+/// index (`/etc/profile` → `setup` on Fedora).
+const POSTINST_ALLOWLIST: &[(&str, &str)] = &[
+    ("/etc/profile", "base-files"),
+    ("/etc/pam.d/common-auth", "libpam-runtime"),
+    ("/etc/pam.d/common-account", "libpam-runtime"),
+    ("/etc/pam.d/common-password", "libpam-runtime"),
+    ("/etc/pam.d/common-session", "libpam-runtime"),
+    ("/etc/pam.d/common-session-noninteractive", "libpam-runtime"),
+    ("/etc/modules", "kmod"),
+];
 
 /// Try each known benign-symlink discriminator in turn; return the matching
 /// pattern tag (used as `benign_pattern` metadata on the reattributed
@@ -574,6 +616,84 @@ usr/share/man/man1/bluetoothctl.1.gz
         assert!(!is_profile_d_symlink_candidate(Path::new(
             "/usr/share/libdebuginfod-common/debuginfod.sh"
         )));
+    }
+
+    fn idx_with_backend() -> OwnershipIndex {
+        OwnershipIndex {
+            files: Some(HashMap::new()),
+            snaps: None,
+        }
+    }
+
+    #[test]
+    fn postinst_allowlist_returns_owning_package_for_known_paths() {
+        let idx = idx_with_backend();
+        // /etc/profile is created by base-files postinst on Debian/Ubuntu.
+        assert_eq!(
+            idx.resolve_postinst_allowlist(Path::new("/etc/profile")),
+            Some("base-files")
+        );
+        // All five PAM common-* files aggregate to libpam-runtime via
+        // pam-auth-update.
+        for name in [
+            "common-auth",
+            "common-account",
+            "common-password",
+            "common-session",
+            "common-session-noninteractive",
+        ] {
+            assert_eq!(
+                idx.resolve_postinst_allowlist(&Path::new("/etc/pam.d").join(name)),
+                Some("libpam-runtime"),
+                "expected {name} → libpam-runtime"
+            );
+        }
+        // /etc/modules is created by kmod postinst on modern Debian/Ubuntu
+        // (was initramfs-tools on older releases).
+        assert_eq!(
+            idx.resolve_postinst_allowlist(Path::new("/etc/modules")),
+            Some("kmod")
+        );
+    }
+
+    #[test]
+    fn postinst_allowlist_returns_none_for_unrelated_paths() {
+        let idx = idx_with_backend();
+        // Real shell file but not on the allowlist (rpm's setup ships it,
+        // dpkg's base-files generates it — different category from the
+        // postinst-created files we catalogue).
+        assert!(
+            idx.resolve_postinst_allowlist(Path::new("/etc/bash.bashrc"))
+                .is_none()
+        );
+        // Adjacent PAM file that is package-shipped, not postinst-generated.
+        assert!(
+            idx.resolve_postinst_allowlist(Path::new("/etc/pam.d/sshd"))
+                .is_none()
+        );
+        // Random path.
+        assert!(
+            idx.resolve_postinst_allowlist(Path::new("/etc/passwd"))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn postinst_allowlist_does_not_fire_without_a_package_backend() {
+        // No file index → no detected package manager → we mustn't fabricate
+        // attribution, even for paths that would otherwise match.
+        let idx = OwnershipIndex {
+            files: None,
+            snaps: None,
+        };
+        assert!(
+            idx.resolve_postinst_allowlist(Path::new("/etc/profile"))
+                .is_none()
+        );
+        assert!(
+            idx.resolve_postinst_allowlist(Path::new("/etc/pam.d/common-auth"))
+                .is_none()
+        );
     }
 
     #[test]

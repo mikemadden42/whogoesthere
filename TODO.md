@@ -299,23 +299,32 @@ ROI for adding more:
       (wrong ext), `/usr/share/libdebuginfod-common/debuginfod.sh` (wrong
       dir); dispatch test confirming `benign_alias_pattern` returns the
       right tag for each shape.
-- [ ] **Known-postinst-generated allowlist for non-symlink files like
-      `/etc/profile`, `/etc/pam.d/common-*`, `/etc/modules`.** Diagnosed
-      on the Ubuntu 24.04 host: `/etc/profile` (582 bytes, mtime is Ubuntu
-      24.04's release date) is created by `base-files`'s postinst script,
-      not unpacked from the archive — dpkg-query reports no owner, and
-      it's not in `/var/lib/dpkg/info/base-files.list`. Same fundamental
-      mechanism as the PAM `common-*` files (libpam-runtime postinst) and
-      `/etc/modules` (kmod/initramfs-tools postinst). rpm includes
-      scriptlet-created files in its file database, which is why Fedora
-      doesn't show this entire bug class — this is the structural source
-      of the dpkg/rpm parity gap. Catalogue the small set of known
-      postinst-generated paths and attribute to their owning packages
-      with `installer: postinst-<pkgname>` metadata. Tractable scope:
-      `/etc/profile` → base-files, `/etc/pam.d/common-*` → libpam-runtime,
-      `/etc/modules` → kmod (or initramfs-tools depending on era). Combined
-      with the profile.d symlink fix above, takes Ubuntu UNTRACKED from
-      33 to ~9 — within Fedora's irreducible 13.
+- [x] **Known-postinst-generated allowlist for non-symlink files like
+      `/etc/profile`, `/etc/pam.d/common-*`, `/etc/modules`.** *Done.* New
+      `POSTINST_ALLOWLIST` static table in `package_ownership.rs` maps each
+      known postinst-emitted path to its owning Debian package:
+      `/etc/profile` → `base-files`; `/etc/pam.d/common-{auth,account,
+      password,session,session-noninteractive}` → `libpam-runtime`;
+      `/etc/modules` → `kmod`. `OwnershipIndex::resolve_postinst_allowlist`
+      gates on `self.files.is_some()` so the allowlist doesn't fire when
+      no package backend was detected — fabricating package names on a
+      non-dpkg/-rpm host would be wrong. Wired into `main.rs` as the third
+      post-attribution pass; attributed findings emit
+      `installer: postinst-<pkgname>` metadata so the attribution
+      mechanism is auditable. Caveat (same as dpkg/rpm file ownership in
+      general): attribution doesn't validate file contents, so an
+      attacker-modified `/etc/profile` would still get marked
+      `base-files`. The malware-triage workflow's primary signal remains
+      UNTRACKED + the broader signal (`mtime`, contents review). 5 unit
+      tests added: positive cases for all 7 catalogued paths via a small
+      `idx_with_backend()` helper; negative cases for non-allowlisted
+      paths (`/etc/bash.bashrc`, `/etc/pam.d/sshd`, `/etc/passwd`); a
+      no-backend gate test that confirms the allowlist no-ops when
+      `files` is `None`. Fedora effect: zero (rpm correctly owns
+      `/etc/profile` via `setup`; the other paths don't exist there).
+      Ubuntu effect predicted: 32 → ~9 (22 PAM + `/etc/profile` collapse;
+      `/etc/modules` stays UNTRACKED if kmod isn't in the package index,
+      but if it is, that drops too).
 - [ ] **Runtime-generated units under `/run/systemd/system/` from real
       packages (low priority, single-case so far).** The Ubuntu 24.04
       capture surfaced one such entry: `/run/systemd/system/

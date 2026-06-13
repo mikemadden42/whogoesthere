@@ -98,6 +98,20 @@ fn main() -> anyhow::Result<()> {
                 f.metadata
                     .insert("installer".to_string(), "snapd".to_string());
             }
+            // Attribute Debian/Ubuntu files known to be created by a
+            // package's postinst script (and therefore invisible to dpkg's
+            // file index): /etc/profile (base-files), /etc/pam.d/common-*
+            // (libpam-runtime), /etc/modules (kmod). Only fires when the
+            // finding is still UNTRACKED at this point.
+            if matches!(f.package, PackageOrigin::Untracked)
+                && let Some(pkg) = index.resolve_postinst_allowlist(&f.source)
+            {
+                f.package = PackageOrigin::Owned {
+                    package: pkg.to_string(),
+                };
+                f.metadata
+                    .insert("installer".to_string(), format!("postinst-{pkg}"));
+            }
         }
         findings.extend(chunk);
     }
