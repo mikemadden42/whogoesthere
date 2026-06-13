@@ -4,5 +4,6 @@ pub mod init;
 pub mod ld_so;
 pub mod modules;
 pub mod shell;
+pub mod ssh;
 pub mod systemd;
 pub mod udev;

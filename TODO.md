@@ -197,8 +197,28 @@ ROI for adding more:
 
 ## Additional persistence vectors (v2 candidates)
 
-- [ ] SSH persistence: `~/.ssh/authorized_keys`, `~/.ssh/rc`, `/etc/ssh/sshrc`,
-      `ForceCommand` in sshd_config.
+- [x] SSH persistence: `~/.ssh/authorized_keys`, `~/.ssh/rc`, `/etc/ssh/sshrc`,
+      `ForceCommand` in sshd_config. *Done — promoted into the v1 checker
+      matrix.* New `ssh` checker emits: one finding per `authorized_keys`
+      key (surfacing the comment field as target, keytype + line + options
+      as metadata, and `forced_command` extracted from `command="..."`
+      options when present); existence + size + unreadable marker for
+      `/etc/ssh/sshrc` and `~/.ssh/rc`; one finding per `ForceCommand` /
+      `AuthorizedKeysCommand` directive in `/etc/ssh/sshd_config` and
+      `/etc/ssh/sshd_config.d/*.conf`, with `Match` block context as
+      `match_block` metadata. Unreadable `sshd_config` (mode 0600 root)
+      produces a marker finding rather than silently disappearing. The
+      authorized-keys parser uses a whole-token-boundary scan for the
+      key-type position with fallback `None` on unrecognized types — see
+      the doc comment on `parse_authorized_key` for the one known
+      limitation (literal key-type tokens inside `command="..."` option
+      values). Validated against a synthetic
+      `command="/tmp/malicious-payload --steal" ssh-ed25519 ... attacker@evilhost`
+      key: surfaced as `UNTRACKED` with `forced_command:
+      /tmp/malicious-payload --steal` metadata. 11 unit tests cover the
+      parser, the forced-command extractor, the whole-token boundary
+      check, and the `sshd_config` directive stripper (both whitespace and
+      `=` separators, case-insensitive key).
 - [ ] PAM: `/etc/pam.d/*` (auth-time module injection).
 - [ ] D-Bus services: `/usr/share/dbus-1/services/`, `/etc/dbus-1/services/`
       (related to the systemd alias noise observed in v1).

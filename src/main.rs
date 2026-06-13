@@ -46,6 +46,7 @@ fn main() -> anyhow::Result<()> {
         Box::new(checkers::udev::UdevChecker),
         Box::new(checkers::modules::ModulesChecker),
         Box::new(checkers::ld_so::LdSoChecker),
+        Box::new(checkers::ssh::SshChecker),
     ];
 
     if cli.list_checkers {

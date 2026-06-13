@@ -22,6 +22,7 @@ The `UNTRACKED` flag on a finding is the primary malware signal.
 | `udev`      | `RUN+=` and `IMPORT{program}=` directives across `/etc/udev/rules.d/`, `/run/udev/rules.d/`, `/lib/udev/rules.d/`, `/usr/lib/udev/rules.d/`. |
 | `modules`   | `/etc/modules` (Debian legacy), `modules-load.d/*.conf`, and `modprobe.d/*.conf` — with special focus on `install <module> <command>` directives, which run arbitrary commands. |
 | `ld_so`     | `/etc/ld.so.preload` and `LD_PRELOAD` in `/etc/environment`. |
+| `ssh`       | Per-user `~/.ssh/authorized_keys` (one finding per key, with `forced_command` surfaced when `command="..."` is set), per-user `~/.ssh/rc` and system `/etc/ssh/sshrc` login scripts, `ForceCommand` and `AuthorizedKeysCommand` in `/etc/ssh/sshd_config` and `sshd_config.d/*.conf` (with `Match` block context as metadata). |
 
 ## Usage
 
@@ -74,8 +75,8 @@ cargo run --release -- --untracked-only --format json
 
 ## Performance
 
-A full run on Fedora 44 (1343 findings across all eight checkers) takes
-~0.76s. Package-ownership attribution is the hot path; it's done once at
+A full run on Fedora 44 (1353 findings across all nine checkers) takes
+~0.7s. Package-ownership attribution is the hot path; it's done once at
 startup by ingesting the entire `rpm` / `dpkg` / `pacman` file index into
 a hash map, then served as O(1) lookups against each finding's source path.
 
@@ -122,11 +123,11 @@ cargo clippy --release --all-targets --all-features -- -Dwarnings -Adeprecated
 
 ## Status
 
-v1 is feature-complete for the eight checkers above. Tested on Fedora 44.
+v1 is feature-complete for the nine checkers above. Tested on Fedora 44.
 Debian/Ubuntu validation pending. See [TODO.md](TODO.md) for the follow-up
-backlog: distro coverage, `--untracked-only` and baseline+diff modes, and
-the v2 vector list (SSH, PAM, D-Bus, dynamic linker, display manager,
-dispatcher scripts, package-manager hooks).
+backlog: distro coverage, baseline+diff mode, and the remaining v2 vector
+list (PAM, D-Bus, dynamic linker, display manager, dispatcher scripts,
+package-manager hooks).
 
 ## Why the name?
 
