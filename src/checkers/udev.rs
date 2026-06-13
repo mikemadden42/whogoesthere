@@ -4,7 +4,7 @@ use std::path::Path;
 
 use crate::checker::Checker;
 use crate::finding::{Finding, PackageOrigin, Scope};
-use crate::util::canonical_unique;
+use crate::util::{canonical_unique, fold_line_continuations};
 
 pub struct UdevChecker;
 
@@ -59,8 +59,13 @@ fn scan_rules_dir(dir: &Path) -> Vec<Finding> {
 }
 
 fn scan_rules_file(content: &str, source: &Path) -> Vec<Finding> {
+    // udev rules use the same `\`-at-EOL line continuation as systemd units,
+    // so fold first; then a multi-physical-line RUN+=/IMPORT{program}=
+    // directive presents as one logical line and the existing per-line
+    // tokenizer handles it correctly.
+    let folded = fold_line_continuations(content);
     let mut findings = Vec::new();
-    for (lineno, line) in content.lines().enumerate() {
+    for (lineno, line) in folded.lines().enumerate() {
         let trimmed = line.trim_start();
         if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;

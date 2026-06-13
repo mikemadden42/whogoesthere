@@ -19,11 +19,13 @@ pub type IniDoc = BTreeMap<String, IniSection>;
 /// are skipped. `[name]` opens a section; subsequent `key = value` lines
 /// land in it (trimmed). Repeated keys accumulate into the value list in
 /// source order. Lines before any section, or `key=value` lines outside a
-/// section, are silently ignored.
+/// section, are silently ignored. Backslash-at-EOL line continuation is
+/// folded before tokenizing — see `fold_line_continuations`.
 pub fn parse_ini(content: &str) -> IniDoc {
+    let folded = fold_line_continuations(content);
     let mut doc: IniDoc = BTreeMap::new();
     let mut current: Option<String> = None;
-    for line in content.lines() {
+    for line in folded.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
             continue;
@@ -43,6 +45,48 @@ pub fn parse_ini(content: &str) -> IniDoc {
             .push(value.trim().to_string());
     }
     doc
+}
+
+/// Fold backslash-at-EOL line continuations into single logical lines.
+/// systemd unit files and udev rules both use `\` at the end of a line to
+/// mean "the value continues on the next line". The continuation is joined
+/// with a single space — sufficient because every consumer treats internal
+/// whitespace as a separator. Lines without a trailing `\` pass through
+/// unchanged. A file ending with a continuation (no following line) is
+/// tolerated — the dangling buffer flushes as the final line.
+pub fn fold_line_continuations(content: &str) -> String {
+    let mut out = String::with_capacity(content.len());
+    let mut buf = String::new();
+    for line in content.lines() {
+        let stripped_right = line.trim_end();
+        if let Some(without_bs) = stripped_right.strip_suffix('\\') {
+            // `trim_end` after stripping the backslash collapses any
+            // whitespace that sat between content and the `\`, so we don't
+            // end up with a doubled separator when we re-join.
+            let body = without_bs.trim_end();
+            if buf.is_empty() {
+                buf.push_str(body);
+            } else {
+                buf.push(' ');
+                buf.push_str(body.trim_start());
+            }
+            continue;
+        }
+        if buf.is_empty() {
+            out.push_str(line);
+        } else {
+            out.push_str(&buf);
+            out.push(' ');
+            out.push_str(line.trim_start());
+            buf.clear();
+        }
+        out.push('\n');
+    }
+    if !buf.is_empty() {
+        out.push_str(&buf);
+        out.push('\n');
+    }
+    out
 }
 
 /// Canonicalize each path (resolving symlinks like `/lib` → `/usr/lib`) and
@@ -104,4 +148,47 @@ pub fn real_users() -> Vec<RealUser> {
         home: u.home_dir().to_path_buf(),
     })
     .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fold_passes_uninterrupted_content_through_unchanged() {
+        let c = "[Unit]\nDescription=Foo\n[Service]\nExecStart=/bin/foo\n";
+        // Trailing newline matches what `content.lines()` collects + the
+        // synthetic newline we add per output line.
+        assert_eq!(fold_line_continuations(c), c);
+    }
+
+    #[test]
+    fn fold_joins_a_single_continuation_pair() {
+        // The systemd "long ExecStart" style — one trailing `\` and a
+        // continuation line that's indented for readability.
+        let c = "ExecStart=/bin/foo \\\n    --arg1 --arg2\n";
+        // Continuation is joined with a single space, indentation stripped.
+        assert_eq!(
+            fold_line_continuations(c),
+            "ExecStart=/bin/foo --arg1 --arg2\n"
+        );
+    }
+
+    #[test]
+    fn fold_joins_multiple_consecutive_continuations() {
+        let c = "ExecStart=/bin/foo \\\n    --a \\\n    --b \\\n    --c\n";
+        assert_eq!(
+            fold_line_continuations(c),
+            "ExecStart=/bin/foo --a --b --c\n"
+        );
+    }
+
+    #[test]
+    fn fold_tolerates_dangling_continuation_at_end_of_file() {
+        // A file ending with `\` and no following line — the buffered
+        // partial line should still flush so we don't silently drop it.
+        let c = "ExecStart=/bin/foo \\";
+        let r = fold_line_continuations(c);
+        assert!(r.starts_with("ExecStart=/bin/foo"));
+    }
 }

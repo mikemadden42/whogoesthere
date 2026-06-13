@@ -550,22 +550,37 @@ ROI for adding more:
 
 ## Parser edge cases
 
-- [ ] systemd unit-file line continuation (`\` at EOL) is not handled. Rare in
-      the persistence-relevant keys but technically valid syntax.
-- [ ] udev rule line continuation (`\` at EOL) likewise unhandled.
-- [ ] **`cron::parse_cron_line` collapses internal whitespace in the command
-      field** (`src/checkers/cron.rs:97-105`). The parser splits on
-      whitespace then re-joins with single spaces, so a command like
-      `echo  "hello  world"` is recorded as `echo "hello world"`. The
-      recorded target then differs from what cron actually runs — cosmetic
-      noise during triage, not a security issue. Same lossiness in
-      `scan_anacrontab` (`src/checkers/cron.rs:224`). Fix by capturing the
-      remainder of the line by byte position rather than rejoining tokens.
-- [ ] **`ld_so::check_environment_file` strips quotes with `trim_matches`**
-      (`src/checkers/ld_so.rs:63`), which removes *all* leading/trailing `"`
-      and `'` characters indiscriminately. Mildly lossy on edge inputs like
-      `LD_PRELOAD="'mixed'"`. Trivial; only matters if someone hand-crafts
-      adversarial quoting.
+- [x] systemd unit-file line continuation (`\` at EOL) is not handled. Rare in
+      the persistence-relevant keys but technically valid syntax. *Done.*
+      New `util::fold_line_continuations` joins backslash-at-EOL into a
+      single logical line (continuations joined with a single space, with
+      leading/trailing whitespace around the join trimmed so multi-line
+      `ExecStart=` doesn't get spurious extra spaces). `parse_ini` calls
+      it before walking lines, so every systemd checker emit path
+      (service/timer/path/socket) automatically inherits the support. 4
+      unit tests cover passthrough, single-continuation join, multiple
+      consecutive continuations, and a dangling-`\` at EOF.
+- [x] udev rule line continuation (`\` at EOL) likewise unhandled. *Done.*
+      `udev::scan_rules_file` now calls `fold_line_continuations` on the
+      file content before per-line tokenizing, so a multi-line
+      `RUN+="..."` or `IMPORT{program}="..."` directive presents as one
+      logical line to the existing extractor. Same shared helper as the
+      systemd path.
+- [x] **`cron::parse_cron_line` collapses internal whitespace in the command
+      field** (`src/checkers/cron.rs:97-105`). *Done.* `parse_cron_line`
+      now calls a new `byte_offset_after_n_tokens` helper to find the
+      byte position just past the schedule (and optional user) tokens in
+      the original line, then takes the remainder verbatim — preserving
+      multi-space, tabs, and any other internal whitespace cron would pass
+      through to the shell. `scan_anacrontab` got the same treatment.
+      Unit test covers the multi-space-plus-tab round-trip case.
+- [x] **`ld_so::check_environment_file` strips quotes with `trim_matches`**
+      (`src/checkers/ld_so.rs:63`). *Done.* New `unquote_env_value` helper
+      only strips one matching pair of outer quotes (same kind on both
+      sides). `"'inner'"` now correctly resolves to `'inner'` instead of
+      having both layers eaten. Unit test covers `""` / `''` pairs,
+      matched-outer-different-inner, asymmetric (no-strip), unquoted
+      (passthrough), and empty/single-char inputs.
 - [x] systemd drop-in dirs (`<unit>.d/*.conf`) are not walked — a malicious
       override that adds `ExecStart` via a drop-in would be missed. *Fixed.*
       `scan_unit_dir` now recurses into `<unit>.<ext>.d` subdirectories whose

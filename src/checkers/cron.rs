@@ -66,6 +66,11 @@ struct CronLine {
 
 /// Parse one cron line. `has_user` is true for /etc/crontab and /etc/cron.d/*,
 /// false for per-user crontabs (where the user is implicit from the filename).
+/// The command field preserves the original byte-level whitespace inside the
+/// command (multi-space, tabs, anything) — only the schedule and user fields
+/// are token-extracted. cron itself passes the post-schedule remainder of the
+/// line to the shell verbatim, so the recorded command needs to match what
+/// actually runs.
 fn parse_cron_line(line: &str, has_user: bool) -> Option<CronLine> {
     let line = line.trim();
     if line.is_empty() || line.starts_with('#') {
@@ -79,6 +84,7 @@ fn parse_cron_line(line: &str, has_user: bool) -> Option<CronLine> {
 
     let mut iter = line.split_whitespace();
     let first = iter.next()?;
+    let schedule_token_count = if first.starts_with('@') { 1 } else { 5 };
     let schedule = if first.starts_with('@') {
         first.to_string()
     } else {
@@ -94,15 +100,42 @@ fn parse_cron_line(line: &str, has_user: bool) -> Option<CronLine> {
     } else {
         None
     };
-    let command: Vec<&str> = iter.collect();
+
+    // Walk the original line to find the byte offset just past the last
+    // schedule (or user) token, then take the rest verbatim — preserving
+    // any internal whitespace inside the command.
+    let total_to_skip = schedule_token_count + usize::from(has_user);
+    let command_start = byte_offset_after_n_tokens(line, total_to_skip)?;
+    let command = line[command_start..].trim_start().to_string();
     if command.is_empty() {
         return None;
     }
+
     Some(CronLine {
         schedule,
         user,
-        command: command.join(" "),
+        command,
     })
+}
+
+/// Return the byte offset just past the `n`th whitespace-separated token in
+/// `s`. `n == 0` returns `0`. `None` if the string runs out before `n` tokens
+/// are consumed.
+fn byte_offset_after_n_tokens(s: &str, n: usize) -> Option<usize> {
+    let bytes = s.as_bytes();
+    let mut pos = 0;
+    for _ in 0..n {
+        while pos < bytes.len() && bytes[pos].is_ascii_whitespace() {
+            pos += 1;
+        }
+        if pos >= bytes.len() {
+            return None;
+        }
+        while pos < bytes.len() && !bytes[pos].is_ascii_whitespace() {
+            pos += 1;
+        }
+    }
+    Some(pos)
 }
 
 fn mechanism_for(schedule: &str, prefix: &str) -> String {
@@ -221,7 +254,12 @@ fn scan_anacrontab() -> Vec<Finding> {
         let period = parts[0];
         let delay_min = parts[1];
         let job_id = parts[2];
-        let command = parts[3..].join(" ");
+        // Preserve the command's internal whitespace by slicing the original
+        // line from just past the third token, same approach as parse_cron_line.
+        let Some(command_start) = byte_offset_after_n_tokens(trimmed, 3) else {
+            continue;
+        };
+        let command = trimmed[command_start..].trim_start().to_string();
 
         let mut metadata = BTreeMap::new();
         metadata.insert("period_days".to_string(), period.to_string());
@@ -368,6 +406,17 @@ mod tests {
         assert_eq!(c.schedule, "*/5 * * * *");
         assert!(c.user.is_none());
         assert_eq!(c.command, "/usr/bin/foo");
+    }
+
+    #[test]
+    fn preserves_command_internal_whitespace_and_tabs() {
+        // cron passes the post-schedule remainder to the shell verbatim, so
+        // multi-space and tab characters inside the command must survive
+        // round-trip — the previous join-on-single-space implementation
+        // silently lost them.
+        let c = parse_cron_line("0 * * * * root /bin/echo  multi   space\tand\ttabs", true)
+            .expect("parses");
+        assert_eq!(c.command, "/bin/echo  multi   space\tand\ttabs");
     }
 
     #[test]

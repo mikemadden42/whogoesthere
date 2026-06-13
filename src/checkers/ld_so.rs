@@ -59,19 +59,33 @@ fn check_environment_file() -> Vec<Finding> {
         .lines()
         .map(str::trim)
         .filter_map(|line| line.strip_prefix("LD_PRELOAD="))
-        .map(|value| {
-            let value = value.trim_matches(|c| c == '"' || c == '\'');
-            Finding {
-                category: "ld_so".to_string(),
-                mechanism: "LD_PRELOAD set in /etc/environment".into(),
-                source: path.to_path_buf(),
-                target: Some(value.to_string()),
-                scope: Scope::System,
-                package: PackageOrigin::Unknown,
-                metadata: BTreeMap::new(),
-            }
+        .map(|value| Finding {
+            category: "ld_so".to_string(),
+            mechanism: "LD_PRELOAD set in /etc/environment".into(),
+            source: path.to_path_buf(),
+            target: Some(unquote_env_value(value).to_string()),
+            scope: Scope::System,
+            package: PackageOrigin::Unknown,
+            metadata: BTreeMap::new(),
         })
         .collect()
+}
+
+/// Strip one matching pair of outer quotes from an `/etc/environment` value.
+/// The previous implementation used `trim_matches` over a closure that
+/// accepted *either* `"` or `'`, which would eat both layers of a value like
+/// `"'mixed'"`. This is faithful instead: only strip if the value starts and
+/// ends with the same quote char, and only strip one layer.
+fn unquote_env_value(value: &str) -> &str {
+    let bytes = value.as_bytes();
+    if bytes.len() >= 2
+        && (bytes[0] == b'"' || bytes[0] == b'\'')
+        && bytes[bytes.len() - 1] == bytes[0]
+    {
+        &value[1..value.len() - 1]
+    } else {
+        value
+    }
 }
 
 /// Walk one ld.so.conf-format file: blank/comment lines skipped, each bare
@@ -142,6 +156,23 @@ mod tests {
 
     fn parse(line: &str) -> Vec<Finding> {
         parse_conf_line(line, Path::new("/etc/ld.so.conf.d/test.conf"), 0)
+    }
+
+    #[test]
+    fn unquote_strips_one_matching_pair_of_outer_quotes() {
+        // Plain double-quoted and single-quoted cases — strip the outer pair.
+        assert_eq!(unquote_env_value(r#""/lib/foo.so""#), "/lib/foo.so");
+        assert_eq!(unquote_env_value("'/lib/foo.so'"), "/lib/foo.so");
+        // Mismatched quotes — the previous trim_matches impl would have eaten
+        // BOTH layers; the correct behavior is to leave them entirely.
+        assert_eq!(unquote_env_value(r#""'inner'""#), "'inner'");
+        // Asymmetric (open with `"`, close with `'`) — don't strip.
+        assert_eq!(unquote_env_value(r#""mismatched'"#), r#""mismatched'"#);
+        // Unquoted — passthrough.
+        assert_eq!(unquote_env_value("/lib/foo.so"), "/lib/foo.so");
+        // Empty + single-char inputs — no quote pair, passthrough.
+        assert_eq!(unquote_env_value(""), "");
+        assert_eq!(unquote_env_value("\""), "\"");
     }
 
     #[test]
