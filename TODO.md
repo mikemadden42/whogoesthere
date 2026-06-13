@@ -437,7 +437,25 @@ ROI for adding more:
       zero UNTRACKED — clean baseline.
 - [ ] Display-manager session hooks: gdm/sddm/lightdm Xsession scripts;
       `~/.xsession`, `~/.xinitrc`, `~/.xprofile`.
-- [ ] NetworkManager dispatcher scripts: `/etc/NetworkManager/dispatcher.d/`.
+- [x] NetworkManager dispatcher scripts: `/etc/NetworkManager/dispatcher.d/`.
+      *Done — promoted into the v1 checker matrix.* New `network_manager`
+      checker walks the main `dispatcher.d/` body plus the three phase
+      sub-dirs (`pre-up.d/`, `pre-down.d/`, `no-wait.d/`). Each
+      executable script emits one finding with `size_bytes`,
+      `executable`, and (when applicable) `phase` metadata. Non-
+      executable scripts still emit a finding but gain a `note`
+      explaining they won't run on dispatch — their presence is admin
+      or attacker intent worth surfacing even when dormant. Editor
+      backups (`*~`) and dotfiles are skipped, matching NM's actual
+      dispatch behavior. The mechanism string differentiates phase
+      timing: main dir "runs on every network event"; pre-up.d/
+      "runs before an interface comes up"; pre-down.d/ "runs before
+      an interface goes down"; no-wait.d/ "runs on every network
+      event, in parallel". Live Fedora 44: zero findings (NM active,
+      dispatcher.d/ tree empty — clean baseline). 5 unit tests cover
+      the executable + metadata path via tempdirs, the non-executable
+      note path, dotfile/`*~` skip, phase metadata + distinct
+      mechanism for sub-dirs, and the missing-directory no-op.
 - [ ] APT/DNF hooks: `/etc/apt/apt.conf.d/`, `/etc/dnf/plugins/`.
 
 ## Parser edge cases

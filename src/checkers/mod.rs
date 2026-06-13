@@ -4,6 +4,7 @@ pub mod dbus;
 pub mod init;
 pub mod ld_so;
 pub mod modules;
+pub mod network_manager;
 pub mod pam;
 pub mod shell;
 pub mod ssh;

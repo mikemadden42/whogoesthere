@@ -70,6 +70,7 @@ fn main() -> anyhow::Result<()> {
         Box::new(checkers::pam::PamChecker),
         Box::new(checkers::ssh::SshChecker),
         Box::new(checkers::dbus::DbusChecker),
+        Box::new(checkers::network_manager::NetworkManagerChecker),
     ];
 
     if cli.list_checkers {
