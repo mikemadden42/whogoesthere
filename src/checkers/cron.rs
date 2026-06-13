@@ -273,7 +273,14 @@ fn scan_user_spool(spool: &Path) -> Vec<Finding> {
             continue;
         };
 
-        let uid = uzers::get_user_by_name(filename).map_or(0, |u| u.uid());
+        // Orphan-spool case: a spool file named for a user who no longer
+        // exists. cron itself silently skips these at run time, but their
+        // presence is still triage-relevant (stale admin state, or an
+        // attacker creating a spool for a not-yet-existent account). Emit
+        // the finding with an `orphan_spool_owner` metadata tag rather
+        // than silently fabricating root attribution.
+        let (uid, orphan) =
+            uzers::get_user_by_name(filename).map_or((0, true), |u| (u.uid(), false));
         let scope = Scope::User {
             uid,
             name: filename.to_string(),
@@ -283,7 +290,13 @@ fn scan_user_spool(spool: &Path) -> Vec<Finding> {
             let Some(parsed) = parse_cron_line(line, false) else {
                 continue;
             };
-            let metadata = metadata_for(&parsed.schedule, None, lineno);
+            let mut metadata = metadata_for(&parsed.schedule, None, lineno);
+            if orphan {
+                metadata.insert(
+                    "orphan_spool_owner".to_string(),
+                    "user does not exist — cron skips this file at run time".to_string(),
+                );
+            }
             findings.push(Finding {
                 category: "cron".to_string(),
                 mechanism: mechanism_for(&parsed.schedule, "user crontab — "),

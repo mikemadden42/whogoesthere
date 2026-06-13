@@ -513,12 +513,24 @@ fn parse_apk_db_content(content: &str) -> Vec<(PathBuf, String)> {
     out
 }
 
+/// True if `prog` resolves anywhere on `$PATH` as an executable file.
+/// Implemented as a direct `$PATH` walk rather than `sh -c "command -v"` so
+/// we don't fork a shell for every detection probe and don't depend on
+/// `/bin/sh` existing (relevant on minimal containers). Each candidate is
+/// checked via `metadata()` for the executable bit; symlinks are followed
+/// (so `which("apk")` works when `/sbin/apk` is a symlink into busybox).
 fn which(prog: &str) -> bool {
-    Command::new("sh")
-        .arg("-c")
-        .arg(format!("command -v {prog}"))
-        .output()
-        .is_ok_and(|o| o.status.success())
+    use std::os::unix::fs::PermissionsExt;
+    let Ok(path) = std::env::var("PATH") else {
+        return false;
+    };
+    path.split(':')
+        .filter(|d| !d.is_empty())
+        .map(|d| Path::new(d).join(prog))
+        .any(|candidate| {
+            fs::metadata(&candidate)
+                .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        })
 }
 
 #[cfg(test)]

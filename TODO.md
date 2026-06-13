@@ -54,17 +54,27 @@
       unprivileged is no longer indistinguishable from a benign empty
       finding. `scan_inittab` already reads content directly and returns no
       findings on failure — separate bug, out of scope here.
-- [ ] **`which()` shells out per probe** (`package_ownership.rs`) via
-      `sh -c "command -v <prog>"`. Works, but a direct `$PATH` scan would drop
-      the shell dependency. Low priority — `prog` is always a hardcoded literal
-      today, so there's no injection surface.
-- [ ] **`autostart::SYSTEM_DIRS` includes `/usr/xdg/autostart`**, which is not
-      a standard XDG path (the real one is `/etc/xdg/autostart`). Harmless — it
-      just no-ops — but it's dead config worth removing or documenting.
-- [ ] **`real_users()` scopes to root + UID 1000–65533**, deliberately skipping
-      system accounts (1–999). Those can still own dotfile/crontab persistence
-      if they have a real login shell. Reasonable default, but undocumented —
-      add a comment noting the exclusion is intentional.
+- [x] **`which()` shells out per probe** (`package_ownership.rs`) via
+      `sh -c "command -v <prog>"`. *Done.* Replaced with a native `$PATH`
+      walk that reads `$PATH`, splits on `:`, and checks each candidate
+      via `fs::metadata` for the executable bit. Drops the shell
+      dependency entirely (no `/bin/sh` fork per probe) and works on
+      minimal containers that may not ship a shell. Symlinks are
+      followed via `metadata()` (not `symlink_metadata`), so
+      `which("apk")` matches when `/sbin/apk → /bin/busybox` on Alpine.
+      Live Fedora regression: total 1725, UNTRACKED 13 — identical to
+      pre-change (rpm correctly detected by the new probe).
+- [x] **`autostart::SYSTEM_DIRS` includes `/usr/xdg/autostart`**, which is not
+      a standard XDG path. *Done — removed.* `SYSTEM_DIRS` now contains only
+      the real `/etc/xdg/autostart`.
+- [x] **`real_users()` scopes to root + UID 1000–65533**, deliberately skipping
+      system accounts (1–999). *Done — documented.* Added a doc comment to
+      `real_users` explaining the Debian/Ubuntu/Fedora UID convention
+      (1–999 = daemons, 1000–65533 = human users, 65534 = `nobody`),
+      why we exclude the 1–999 range (daemon dotfiles are noise, and
+      daemons don't typically host persistence in their `$HOME`), and
+      the accepted trade-off (a service account at UID 500 with a real
+      login shell wouldn't be surveyed). No behavior change.
 - [ ] **`SystemdChecker` reports `Scope::System` for the `user-global` unit
       dirs** (`/etc/systemd/user`, `/usr/lib/systemd/user`, etc. — see
       `src/checkers/systemd.rs:50`). These units don't actually run as root,
@@ -73,12 +83,15 @@
       for any downstream that consumes scope structurally. Consider a
       `Scope::UserGlobal` variant if/when a baseline+diff or filter UI needs
       to distinguish.
-- [ ] **`cron::scan_user_spool` falls back to uid 0 for unknown usernames**
-      (`src/checkers/cron.rs:276`). A stale spool file left over from a
-      deleted user would attribute persistence to root, which is wrong and
-      could obscure triage. Niche, but the fix is one line — skip the file
-      (or tag the finding with `orphan_spool_owner: <filename>`) when
-      `get_user_by_name` returns `None`.
+- [x] **`cron::scan_user_spool` falls back to uid 0 for unknown usernames**
+      (`src/checkers/cron.rs:276`). *Done.* The lookup now returns
+      `(uid, orphan: bool)` instead of silently using uid 0. When the
+      user doesn't exist, the finding is still emitted (its presence is
+      triage-relevant — stale admin state, or an attacker creating a
+      spool for a not-yet-existent user) and tagged with
+      `orphan_spool_owner: "user does not exist — cron skips this file
+      at run time"` metadata so the analyst sees that cron itself won't
+      run it. No-orphan path is unchanged.
 
 ## Testing
 

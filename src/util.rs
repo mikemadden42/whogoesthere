@@ -74,6 +74,18 @@ pub struct RealUser {
 
 /// Enumerate "real" users: root and UID 1000..65534, with a real login shell.
 /// Skips daemons, nologin accounts, and system users.
+///
+/// The UID range is deliberate. The Debian/Ubuntu/Fedora convention reserves
+/// 1–999 for system accounts (created by package postinst scripts for daemons
+/// like `postgres`, `nginx`, etc.) and 1000–65533 for human users; 65534 is
+/// `nobody`. Excluding 1–999 keeps us from enumerating daemon dotfiles —
+/// daemons don't have meaningful `~/.bashrc` etc., and surfacing their
+/// (mostly empty) homes would be noise. The trade-off: a system account
+/// that legitimately *does* host persistence (e.g. an admin-installed
+/// service user with a real login shell at UID 500) won't be surveyed.
+/// That's an accepted limitation — admins who care can rerun targeting
+/// the specific home dirs, and the typical malware-triage case doesn't
+/// hit this.
 pub fn real_users() -> Vec<RealUser> {
     // SAFETY: uzers::all_users wraps getpwent(), which is not thread-safe.
     // whogoesthere is single-threaded, so this is fine.
