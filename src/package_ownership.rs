@@ -13,21 +13,27 @@ pub struct OwnershipIndex {
     snaps: Option<HashSet<String>>,
 }
 
+#[derive(Clone, Copy)]
 enum PackageManager {
     Dpkg,
     Rpm,
     Pacman,
-    None,
 }
 
 impl OwnershipIndex {
     pub fn build() -> Self {
-        let files = match detect() {
+        // Build every available backend and merge — earlier loop fed only the
+        // first detected PM, so a host with both dpkg and rpm installed would
+        // silently lose attribution for the unselected backend (every rpm-
+        // owned file would show UNTRACKED). Multi-PM hosts are rare but the
+        // failure mode is the worst possible: false UNTRACKEDs exactly in the
+        // signal that matters.
+        let backends = detect_all();
+        let files = merge_indices(backends.into_iter().filter_map(|pm| match pm {
             PackageManager::Dpkg => build_dpkg_index(),
             PackageManager::Rpm => build_rpm_index(),
             PackageManager::Pacman => build_pacman_index(),
-            PackageManager::None => None,
-        };
+        }));
         let snaps = build_snap_set();
         Self { files, snaps }
     }
@@ -115,8 +121,8 @@ impl OwnershipIndex {
     ///     session-noninteractive}` ← libpam-runtime via `pam-auth-update`
     ///   * `/etc/modules` ← kmod postinst (initramfs-tools on older releases)
     pub fn resolve_postinst_allowlist(&self, path: &Path) -> Option<&'static str> {
-        // Gate on having a real package backend — on a host where `detect()`
-        // returned None, fabricating package names is wrong.
+        // Gate on having a real package backend — on a host where
+        // `detect_all()` returned empty, fabricating package names is wrong.
         self.files.as_ref()?;
         POSTINST_ALLOWLIST
             .iter()
@@ -251,15 +257,43 @@ fn build_snap_set() -> Option<HashSet<String>> {
     if set.is_empty() { None } else { Some(set) }
 }
 
-fn detect() -> PackageManager {
+/// Enumerate every package manager available on the host, not just the first
+/// one found. On the vast majority of systems this returns a one-element vec
+/// (or empty on a rare PM-less host like an embedded build); on the rare
+/// multi-PM host (e.g. Fedora with `dpkg` installed for building Debian
+/// packages, or a Debian builder with `rpm` installed for cross-distro work)
+/// we build every backend's index and merge so neither set of files gets
+/// silently UNTRACKED.
+fn detect_all() -> Vec<PackageManager> {
+    let mut out = Vec::new();
     if which("dpkg") {
-        PackageManager::Dpkg
-    } else if which("rpm") {
-        PackageManager::Rpm
-    } else if which("pacman") {
-        PackageManager::Pacman
+        out.push(PackageManager::Dpkg);
+    }
+    if which("rpm") {
+        out.push(PackageManager::Rpm);
+    }
+    if which("pacman") {
+        out.push(PackageManager::Pacman);
+    }
+    out
+}
+
+/// Merge per-backend file indices into one. Returns `None` only if every
+/// backend yielded `None` (no PM at all, or every backend's build failed).
+/// On rare path collisions across backends the last write wins — both
+/// attributions name a real owning package, and the UNTRACKED signal we
+/// actually care about is unaffected.
+fn merge_indices(
+    backends: impl Iterator<Item = HashMap<PathBuf, String>>,
+) -> Option<HashMap<PathBuf, String>> {
+    let mut merged: HashMap<PathBuf, String> = HashMap::new();
+    for backend in backends {
+        merged.extend(backend);
+    }
+    if merged.is_empty() {
+        None
     } else {
-        PackageManager::None
+        Some(merged)
     }
 }
 
@@ -675,6 +709,62 @@ usr/share/man/man1/bluetoothctl.1.gz
         assert!(
             idx.resolve_postinst_allowlist(Path::new("/etc/passwd"))
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn merge_indices_unions_per_backend_maps() {
+        // Each backend contributes its own paths. Non-overlapping case is
+        // the common one — dpkg owns its tree, rpm owns its tree, nothing
+        // overlaps in practice.
+        let dpkg = HashMap::from([
+            (PathBuf::from("/usr/bin/foo"), "foo".to_string()),
+            (PathBuf::from("/etc/foo.conf"), "foo".to_string()),
+        ]);
+        let rpm = HashMap::from([
+            (
+                PathBuf::from("/usr/bin/bar"),
+                "bar-1.0-1.fc44.x86_64".to_string(),
+            ),
+            (
+                PathBuf::from("/etc/bar.conf"),
+                "bar-1.0-1.fc44.x86_64".to_string(),
+            ),
+        ]);
+        let merged = merge_indices([dpkg, rpm].into_iter()).expect("non-empty");
+        assert_eq!(merged.len(), 4);
+        assert_eq!(
+            merged.get(Path::new("/usr/bin/foo")).map(String::as_str),
+            Some("foo")
+        );
+        assert_eq!(
+            merged.get(Path::new("/usr/bin/bar")).map(String::as_str),
+            Some("bar-1.0-1.fc44.x86_64")
+        );
+    }
+
+    #[test]
+    fn merge_indices_empty_input_returns_none() {
+        // No backends and an empty merge both yield None — the
+        // OwnershipIndex then reports Unknown for every path, matching
+        // pre-multi-PM behavior on a PM-less host.
+        assert!(merge_indices(std::iter::empty()).is_none());
+        let empty: HashMap<PathBuf, String> = HashMap::new();
+        assert!(merge_indices([empty].into_iter()).is_none());
+    }
+
+    #[test]
+    fn merge_indices_last_write_wins_on_collision() {
+        // Two backends claiming the same path is rare in practice (different
+        // PMs target different file roots) but possible. Either attribution
+        // names a real owning package; we pick deterministically by
+        // input-order last-write-wins.
+        let first = HashMap::from([(PathBuf::from("/usr/bin/x"), "first".to_string())]);
+        let second = HashMap::from([(PathBuf::from("/usr/bin/x"), "second".to_string())]);
+        let merged = merge_indices([first, second].into_iter()).expect("non-empty");
+        assert_eq!(
+            merged.get(Path::new("/usr/bin/x")).map(String::as_str),
+            Some("second")
         );
     }
 

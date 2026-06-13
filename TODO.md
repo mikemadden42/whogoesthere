@@ -30,13 +30,21 @@
       *Result: on this Ubuntu box UNTRACKED dropped 1019 → 73 (total findings
       unchanged at 1288); under `/usr/lib/systemd/system`, 414 now attributed
       vs 11 genuinely unowned. Unit-tested in `package_ownership::tests`.*
-- [ ] **`detect()` picks a single package-manager backend, first match wins**
-      (`package_ownership.rs`). On a host with both `dpkg` and `rpm`
-      installed, only dpkg-owned files get attributed; every rpm-owned file
-      falls through to `UNTRACKED`. Rare, but it produces false positives in
-      exactly the signal that matters. Consider building all available
-      backends and merging their indices, or at least documenting the
-      first-match behavior.
+- [x] **`detect()` picks a single package-manager backend, first match wins**
+      (`package_ownership.rs`). *Done.* Renamed to `detect_all()`,
+      returns `Vec<PackageManager>` of every available backend.
+      `OwnershipIndex::build` now iterates available backends, builds
+      each index, and merges via a new `merge_indices` helper.
+      Per-backend collisions (rare in practice — different PMs target
+      different file roots) resolve last-write-wins; either attribution
+      names a real owning package, and the `UNTRACKED` signal we
+      actually care about is unaffected. The empty-input case (no PM
+      on the host) still yields `None`, matching pre-change behavior
+      for PM-less hosts. The `PackageManager::None` variant was removed
+      — its role is now expressed by an empty `Vec`. Live Fedora: zero
+      change (only `rpm` installed, behavior identical). 3 unit tests
+      added: non-overlapping union, empty-input → `None`, collision
+      last-write-wins.
 - [x] **Unreadable files are silently flagged as findings with no indication
       they couldn't be read.** *Fixed.* `shell::check_file`,
       `init::scan_initd`, and `init::scan_rc_local` now probe readability via
