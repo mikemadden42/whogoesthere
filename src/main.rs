@@ -22,6 +22,10 @@ struct Cli {
     /// Show only findings no package owns — the malware-triage signal.
     #[arg(long)]
     untracked_only: bool,
+
+    /// List the available checker names and exit. Use with --checker.
+    #[arg(long)]
+    list_checkers: bool,
 }
 
 #[derive(Clone, ValueEnum)]
@@ -43,6 +47,15 @@ fn main() -> anyhow::Result<()> {
         Box::new(checkers::modules::ModulesChecker),
         Box::new(checkers::ld_so::LdSoChecker),
     ];
+
+    if cli.list_checkers {
+        let mut names: Vec<&str> = checkers.iter().map(|c| c.name()).collect();
+        names.sort_unstable();
+        for n in names {
+            println!("{n}");
+        }
+        return Ok(());
+    }
 
     let index = package_ownership::OwnershipIndex::build();
     let mut findings: Vec<Finding> = Vec::new();

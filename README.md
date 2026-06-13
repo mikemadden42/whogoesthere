@@ -32,6 +32,9 @@ cargo run --release
 # JSON output
 cargo run --release -- --format json
 
+# List available checker names
+cargo run --release -- --list-checkers
+
 # Just one checker (repeatable)
 cargo run --release -- --checker systemd --checker cron
 
