@@ -176,11 +176,25 @@ ROI for adding more:
       the dpkg branch on a real Arch box.
 
 ### Worth considering (containers/cloud)
-- [ ] **Alpine (apk)**. Small distro but ubiquitous in Docker. Package DB
-      at `/lib/apk/db/installed` is a single concatenated file with `F:`
-      lines for files (relative to current `P:`/`o:` package). Slightly
-      different parser but cheap. Pairs with the existing "Run against
-      Alpine" TODO under Distro coverage.
+- [x] **Alpine (apk).** *Code-complete, unverified on real Alpine.* New
+      `PackageManager::Apk` variant in `detect_all()` probes via
+      `which("apk")`; `build_apk_index()` reads `/lib/apk/db/installed`
+      and the new `parse_apk_db_content` walks the file with a small
+      state machine tracking the current `P:<name>` / `V:<version>` /
+      `F:<dir>` across each stanza, emitting one `(path, "<name>-<version>")`
+      pair per `R:<filename>` line. Blank lines reset state so a stanza
+      can't leak into the next one — that's the load-bearing case
+      because incorrect leakage would attribute paths under the wrong
+      package. Unknown tags (`A:`/`S:`/`D:`/`m:`/`t:`/`c:`/`Z:`/`a:` etc.)
+      pass through silently. The package ID format `<name>-<version>`
+      matches what `apk info --who-owns` reports. 5 unit tests: basic
+      per-`R:` emission with mid-stanza `F:` change, blank-line stanza
+      separator, unknown-tag passthrough + orphan-`R:` rejection,
+      empty-`F:` for root files, empty-input. Same caveat as the pacman
+      branch: needs the same smoke-test treatment on a real Alpine box
+      to confirm `which("apk")` detection and the path forms reported
+      match the actual `apk info --who-owns` output. Pairs with the
+      "Run against Alpine" TODO under Distro coverage.
 
 ### Awkward fit — likely skip or detect-and-bail
 - [ ] **NixOS**. Fundamentally different model: everything in `/nix/store`

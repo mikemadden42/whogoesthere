@@ -113,8 +113,11 @@ cargo run --release -- --untracked-only --format json
 
 A full run on Fedora 44 (1588 findings across all ten checkers) takes
 ~0.7s. Package-ownership attribution is the hot path; it's done once at
-startup by ingesting the entire `rpm` / `dpkg` / `pacman` file index into
-a hash map, then served as O(1) lookups against each finding's source path.
+startup by ingesting the entire `rpm` / `dpkg` / `pacman` / `apk` file index
+into a hash map, then served as O(1) lookups against each finding's source
+path. All available package-manager backends are detected and their indices
+merged, so multi-PM hosts (e.g. Fedora with `dpkg` installed for cross-distro
+builds) don't silently lose attribution for the unselected backend.
 
 ## Building a single static binary
 

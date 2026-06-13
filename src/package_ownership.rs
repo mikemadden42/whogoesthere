@@ -18,6 +18,7 @@ enum PackageManager {
     Dpkg,
     Rpm,
     Pacman,
+    Apk,
 }
 
 impl OwnershipIndex {
@@ -33,6 +34,7 @@ impl OwnershipIndex {
             PackageManager::Dpkg => build_dpkg_index(),
             PackageManager::Rpm => build_rpm_index(),
             PackageManager::Pacman => build_pacman_index(),
+            PackageManager::Apk => build_apk_index(),
         }));
         let snaps = build_snap_set();
         Self { files, snaps }
@@ -275,6 +277,9 @@ fn detect_all() -> Vec<PackageManager> {
     if which("pacman") {
         out.push(PackageManager::Pacman);
     }
+    if which("apk") {
+        out.push(PackageManager::Apk);
+    }
     out
 }
 
@@ -453,6 +458,61 @@ fn parse_pacman_files_content(content: &str) -> Vec<PathBuf> {
     out
 }
 
+/// apk: the entire installed-package database lives in a single text file at
+/// `/lib/apk/db/installed`. Stanzas (one per package) are separated by blank
+/// lines; within each stanza, lines are `<tag>:<value>` with single-letter
+/// tags. Persistence-relevant tags for ownership:
+///   * `P:<name>` — package name (set once per stanza, near the top)
+///   * `V:<version>` — version string (set once per stanza)
+///   * `F:<dir>` — current directory, relative to `/` (may appear multiple
+///     times in one stanza, each starting a new path context)
+///   * `R:<filename>` — one file in the current `F:` directory
+///
+/// The package identifier we emit is `<name>-<version>`, matching what
+/// `apk info --who-owns` reports.
+fn build_apk_index() -> Option<HashMap<PathBuf, String>> {
+    let content = fs::read_to_string("/lib/apk/db/installed").ok()?;
+    let map: HashMap<PathBuf, String> = parse_apk_db_content(&content).into_iter().collect();
+    if map.is_empty() { None } else { Some(map) }
+}
+
+/// Parse `/lib/apk/db/installed`. State machine: track the current package
+/// `<name, version>` and the current `F:` directory across lines; emit one
+/// `(path, pkg)` pair per `R:` entry. A blank line ends a stanza and resets
+/// state, so a stray `R:` outside a stanza (or before `P:`/`F:` are set)
+/// is silently dropped. Unknown tags pass through untouched.
+fn parse_apk_db_content(content: &str) -> Vec<(PathBuf, String)> {
+    let mut out = Vec::new();
+    let mut name: Option<String> = None;
+    let mut version: Option<String> = None;
+    let mut dir: Option<String> = None;
+    for line in content.lines() {
+        if line.is_empty() {
+            name = None;
+            version = None;
+            dir = None;
+            continue;
+        }
+        let Some((tag, value)) = line.split_once(':') else {
+            continue;
+        };
+        match tag {
+            "P" => name = Some(value.to_string()),
+            "V" => version = Some(value.to_string()),
+            "F" => dir = Some(value.to_string()),
+            "R" => {
+                let (Some(n), Some(v), Some(d)) = (&name, &version, &dir) else {
+                    continue;
+                };
+                let path = PathBuf::from(format!("/{d}/{value}"));
+                out.push((path, format!("{n}-{v}")));
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 fn which(prog: &str) -> bool {
     Command::new("sh")
         .arg("-c")
@@ -614,6 +674,121 @@ usr/share/man/man1/bluetoothctl.1.gz
     fn pacman_files_parser_empty_when_no_files_section() {
         let content = "%NAME%\nfoo\n\n%VERSION%\n1.0-1\n";
         assert!(parse_pacman_files_content(content).is_empty());
+    }
+
+    #[test]
+    fn apk_parser_emits_path_per_r_line_with_current_f_dir_and_package() {
+        // Each `R:` lives under the most recent `F:` directory in the same
+        // stanza; the `<name>-<version>` ID matches `apk info --who-owns`.
+        let content = "\
+P:musl
+V:1.2.4-r2
+F:lib
+R:libc.musl-x86_64.so.1
+F:usr/lib
+R:ld-musl-x86_64.so.1
+
+P:busybox
+V:1.36.1-r2
+F:bin
+R:busybox
+F:usr/sbin
+R:logread
+";
+        let pairs = parse_apk_db_content(content);
+        assert_eq!(pairs.len(), 4);
+        assert!(pairs.contains(&(
+            PathBuf::from("/lib/libc.musl-x86_64.so.1"),
+            "musl-1.2.4-r2".to_string()
+        )));
+        assert!(pairs.contains(&(
+            PathBuf::from("/usr/lib/ld-musl-x86_64.so.1"),
+            "musl-1.2.4-r2".to_string()
+        )));
+        assert!(pairs.contains(&(
+            PathBuf::from("/bin/busybox"),
+            "busybox-1.36.1-r2".to_string()
+        )));
+        assert!(pairs.contains(&(
+            PathBuf::from("/usr/sbin/logread"),
+            "busybox-1.36.1-r2".to_string()
+        )));
+    }
+
+    #[test]
+    fn apk_parser_blank_line_resets_state_between_packages() {
+        // Across-stanza leakage would be the worst possible bug — emitting
+        // a path under the wrong package's name. The blank line is the only
+        // stanza separator, so this is the load-bearing case.
+        let content = "\
+P:pkg-a
+V:1.0
+F:bin
+R:a-only
+
+P:pkg-b
+V:2.0
+R:should-not-emit
+";
+        let pairs = parse_apk_db_content(content);
+        // `should-not-emit` has no `F:` set in pkg-b's stanza after the blank
+        // line reset, so it shouldn't appear at all.
+        assert_eq!(pairs.len(), 1);
+        assert_eq!(
+            pairs[0],
+            (PathBuf::from("/bin/a-only"), "pkg-a-1.0".to_string())
+        );
+    }
+
+    #[test]
+    fn apk_parser_ignores_unknown_tags_and_r_without_p_or_f() {
+        // Real apk DB has many tags we don't care about (A:, S:, D:, m:, t:,
+        // c:, Z:, a:, etc.) — they must pass through silently. Likewise
+        // an `R:` before `P:` or `F:` are set is silently dropped, not a
+        // panic.
+        let content = "\
+S:135483
+T:no package context yet
+R:orphan-before-P
+
+P:foo
+V:0.1-r0
+S:99
+F:etc
+R:foo.conf
+Z:Q1somehashhere
+a:0:0:0644
+";
+        let pairs = parse_apk_db_content(content);
+        assert_eq!(pairs.len(), 1);
+        assert_eq!(
+            pairs[0],
+            (PathBuf::from("/etc/foo.conf"), "foo-0.1-r0".to_string())
+        );
+    }
+
+    #[test]
+    fn apk_parser_handles_empty_f_dir_for_root_files() {
+        // An `F:` with an empty value means the file lives directly under `/`.
+        // We construct `/{dir}/{filename}` which yields `//foo` — that's
+        // semantically `/foo` and PathBuf treats `//foo` as the same path.
+        let content = "\
+P:rootfile
+V:0
+F:
+R:rootonly
+";
+        let pairs = parse_apk_db_content(content);
+        assert_eq!(pairs.len(), 1);
+        // The leading `//` is a PathBuf-equivalent of `/` — check by
+        // canonicalising the form we'd actually look up against.
+        assert_eq!(pairs[0].0, PathBuf::from("//rootonly"));
+        assert_eq!(pairs[0].1, "rootfile-0");
+    }
+
+    #[test]
+    fn apk_parser_empty_input_returns_empty() {
+        assert!(parse_apk_db_content("").is_empty());
     }
 
     #[test]
