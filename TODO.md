@@ -57,6 +57,20 @@
       system accounts (1–999). Those can still own dotfile/crontab persistence
       if they have a real login shell. Reasonable default, but undocumented —
       add a comment noting the exclusion is intentional.
+- [ ] **`SystemdChecker` reports `Scope::System` for the `user-global` unit
+      dirs** (`/etc/systemd/user`, `/usr/lib/systemd/user`, etc. — see
+      `src/checkers/systemd.rs:50`). These units don't actually run as root,
+      they're user-scope unit definitions shipped system-wide. The `location:
+      user-global` metadata disambiguates, but the typed `Scope` is misleading
+      for any downstream that consumes scope structurally. Consider a
+      `Scope::UserGlobal` variant if/when a baseline+diff or filter UI needs
+      to distinguish.
+- [ ] **`cron::scan_user_spool` falls back to uid 0 for unknown usernames**
+      (`src/checkers/cron.rs:276`). A stale spool file left over from a
+      deleted user would attribute persistence to root, which is wrong and
+      could obscure triage. Niche, but the fix is one line — skip the file
+      (or tag the finding with `orphan_spool_owner: <filename>`) when
+      `get_user_by_name` returns `None`.
 
 ## Testing
 
@@ -267,6 +281,19 @@ ROI for adding more:
 - [ ] systemd unit-file line continuation (`\` at EOL) is not handled. Rare in
       the persistence-relevant keys but technically valid syntax.
 - [ ] udev rule line continuation (`\` at EOL) likewise unhandled.
+- [ ] **`cron::parse_cron_line` collapses internal whitespace in the command
+      field** (`src/checkers/cron.rs:97-105`). The parser splits on
+      whitespace then re-joins with single spaces, so a command like
+      `echo  "hello  world"` is recorded as `echo "hello world"`. The
+      recorded target then differs from what cron actually runs — cosmetic
+      noise during triage, not a security issue. Same lossiness in
+      `scan_anacrontab` (`src/checkers/cron.rs:224`). Fix by capturing the
+      remainder of the line by byte position rather than rejoining tokens.
+- [ ] **`ld_so::check_environment_file` strips quotes with `trim_matches`**
+      (`src/checkers/ld_so.rs:63`), which removes *all* leading/trailing `"`
+      and `'` characters indiscriminately. Mildly lossy on edge inputs like
+      `LD_PRELOAD="'mixed'"`. Trivial; only matters if someone hand-crafts
+      adversarial quoting.
 - [x] systemd drop-in dirs (`<unit>.d/*.conf`) are not walked — a malicious
       override that adds `ExecStart` via a drop-in would be missed. *Fixed.*
       `scan_unit_dir` now recurses into `<unit>.<ext>.d` subdirectories whose
@@ -283,3 +310,12 @@ ROI for adding more:
       auditing the *merged* unit (e.g. a drop-in that only sets `User=` of an
       existing service is still silent — would require loading base + all
       drop-ins together).
+
+## Style / cosmetic
+
+- [ ] **`is_fedora_dbus_alias` is named Fedora-specific but the pattern likely
+      generalizes** (`src/package_ownership.rs:75`). D-Bus activation aliases
+      at `/etc/systemd/{system,user}/dbus-org.*.service` aren't unique to
+      Fedora. Once Debian/Arch baselines are taken, either confirm the same
+      shape and rename to `is_dbus_activation_alias`, or document the
+      distro-specificity in the function comment.
