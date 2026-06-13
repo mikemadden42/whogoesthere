@@ -177,8 +177,19 @@ ROI for adding more:
 - [ ] systemd unit-file line continuation (`\` at EOL) is not handled. Rare in
       the persistence-relevant keys but technically valid syntax.
 - [ ] udev rule line continuation (`\` at EOL) likewise unhandled.
-- [ ] systemd drop-in dirs (`<unit>.d/*.conf`) are not walked — a malicious
-      override that adds `ExecStart` via a drop-in would be missed. NOTE: this
-      is a genuine *detection blind spot*, not a cosmetic parser nicety — it's
-      arguably the most security-relevant gap in this file and deserves
-      promotion above the line-continuation items.
+- [x] systemd drop-in dirs (`<unit>.d/*.conf`) are not walked — a malicious
+      override that adds `ExecStart` via a drop-in would be missed. *Fixed.*
+      `scan_unit_dir` now recurses into `<unit>.<ext>.d` subdirectories whose
+      stem ends in a surveyed unit extension (service/timer/path/socket),
+      filtering out the unrelated `*.wants/` and `*.requires/` symlink farms.
+      Each `*.conf` is parsed by the existing `parse_ini` and dispatched to
+      the matching emit function, so any Exec*/OnCalendar=/Listen=/Path*
+      directive in a drop-in produces a finding attributed to the conf path
+      (not the base unit). Mechanism gains an " override" qualifier and an
+      `overrides: <unit>` metadata key surfaces the target. Validated against
+      a synthetic `~/.config/systemd/user/test-evil.service.d/99-override.conf`
+      with `ExecStart=/tmp/malicious-payload`: flagged `UNTRACKED` as
+      expected. `is_dropin_dir` discriminator unit-tested. Out of scope:
+      auditing the *merged* unit (e.g. a drop-in that only sets `User=` of an
+      existing service is still silent — would require loading base + all
+      drop-ins together).

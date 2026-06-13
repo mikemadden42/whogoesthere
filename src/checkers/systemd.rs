@@ -76,6 +76,14 @@ fn scan_unit_dir(
     let mut findings = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
+        // Drop-in dirs like foo.service.d/ hold *.conf override fragments that
+        // can add ExecStart=, OnCalendar=, Listen=, etc. to the base unit. A
+        // malicious override in /etc/systemd/system/foo.service.d/ is a real
+        // persistence vector and the conf file's path is what gets attributed.
+        if path.is_dir() && is_dropin_dir(&path) {
+            findings.extend(scan_dropin_dir(&path, seen, scope, location));
+            continue;
+        }
         let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
             continue;
         };
@@ -91,6 +99,67 @@ fn scan_unit_dir(
         };
         let unit = parse_ini(&content);
         findings.extend(emit_findings(&unit, &path, ext, scope, location));
+    }
+    findings
+}
+
+/// True for `<unit>.<ext>.d` where `<ext>` is one of our surveyed unit types.
+/// Filters out the unrelated `*.wants/` and `*.requires/` symlink farms that
+/// also live in unit dirs.
+fn is_dropin_dir(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    let Some(unit_name) = name.strip_suffix(".d") else {
+        return false;
+    };
+    Path::new(unit_name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|ext| UNIT_EXTS.contains(&ext))
+}
+
+fn scan_dropin_dir(
+    dir: &Path,
+    seen: &mut HashSet<PathBuf>,
+    scope: &Scope,
+    location: &'static str,
+) -> Vec<Finding> {
+    let Some(name) = dir.file_name().and_then(|n| n.to_str()) else {
+        return Vec::new();
+    };
+    let Some(unit_name) = name.strip_suffix(".d") else {
+        return Vec::new();
+    };
+    let Some(ext) = Path::new(unit_name).extension().and_then(|e| e.to_str()) else {
+        return Vec::new();
+    };
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut findings = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("conf") {
+            continue;
+        }
+        let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
+        if !seen.insert(canonical) {
+            continue;
+        }
+        let Ok(content) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let unit = parse_ini(&content);
+        let mut emitted = emit_findings(&unit, &path, ext, scope, location);
+        for f in &mut emitted {
+            f.metadata
+                .insert("overrides".to_string(), unit_name.to_string());
+            if let Some(idx) = f.mechanism.rfind(" (") {
+                f.mechanism.insert_str(idx, " override");
+            }
+        }
+        findings.extend(emitted);
     }
     findings
 }
@@ -336,4 +405,38 @@ fn activated_unit_name(unit: &Unit, source: &Path, section: &str, key: &str) -> 
     }
     let stem = source.file_stem()?.to_str()?;
     Some(format!("{stem}.service"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dropin_dirs_match_known_unit_extensions() {
+        assert!(is_dropin_dir(Path::new("/etc/systemd/system/sshd.service.d")));
+        assert!(is_dropin_dir(Path::new("/etc/systemd/system/foo.timer.d")));
+        assert!(is_dropin_dir(Path::new("/etc/systemd/system/foo.path.d")));
+        assert!(is_dropin_dir(Path::new("/etc/systemd/system/foo.socket.d")));
+    }
+
+    #[test]
+    fn rejects_wants_requires_and_unsurveyed_unit_types() {
+        // multi-user.target.wants/ and foo.service.wants/ are symlink farms,
+        // not drop-ins.
+        assert!(!is_dropin_dir(Path::new(
+            "/etc/systemd/system/multi-user.target.wants"
+        )));
+        assert!(!is_dropin_dir(Path::new(
+            "/etc/systemd/system/sshd.service.wants"
+        )));
+        // Targets and slices aren't surveyed, so their drop-ins aren't either.
+        assert!(!is_dropin_dir(Path::new(
+            "/etc/systemd/system/multi-user.target.d"
+        )));
+        assert!(!is_dropin_dir(Path::new(
+            "/usr/lib/systemd/system/system.slice.d"
+        )));
+        // A bare `.d` suffix with no unit extension is not a drop-in.
+        assert!(!is_dropin_dir(Path::new("/etc/systemd/system/foo.d")));
+    }
 }
