@@ -413,7 +413,9 @@ mod tests {
 
     #[test]
     fn dropin_dirs_match_known_unit_extensions() {
-        assert!(is_dropin_dir(Path::new("/etc/systemd/system/sshd.service.d")));
+        assert!(is_dropin_dir(Path::new(
+            "/etc/systemd/system/sshd.service.d"
+        )));
         assert!(is_dropin_dir(Path::new("/etc/systemd/system/foo.timer.d")));
         assert!(is_dropin_dir(Path::new("/etc/systemd/system/foo.path.d")));
         assert!(is_dropin_dir(Path::new("/etc/systemd/system/foo.socket.d")));

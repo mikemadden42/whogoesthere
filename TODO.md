@@ -151,8 +151,22 @@ ROI for adding more:
 
 ## Noise reduction & output
 
-- [ ] Built-in allowlist for the Fedora `dbus-org.*` activation aliases under
+- [x] Built-in allowlist for the Fedora `dbus-org.*` activation aliases under
       `/etc/systemd/system/`. They reliably show UNTRACKED but are benign.
+      *Fixed via attribute-through-symlink rather than a blunt allowlist.*
+      `OwnershipIndex::resolve_benign_alias` recognizes
+      `/etc/systemd/{system,user}/dbus-org.*.service`, canonicalizes the
+      symlink, and *only* reattributes to the target's owning package if the
+      canonicalized target is itself package-owned. A malicious
+      `dbus-org.evil.service → /tmp/evil.service` would not resolve to an
+      owned target and stays `UNTRACKED` — the security property holds. The
+      reattributed finding gains `benign_pattern: fedora-dbus-alias` and
+      `alias_target: <resolved path>` metadata so the attribution is
+      auditable. Result on this Fedora box: 22 → 10 UNTRACKED across all
+      checkers (12 dbus-org.* aliases reattributed at both system and
+      user-global scope). Unit-tested via `is_fedora_dbus_alias` cases for
+      both scopes plus rejection of wrong-prefix, wrong-extension, and
+      wrong-directory shapes.
 - [ ] `--untracked-only` flag. The malware-detection workflow is "show me
       what's not in any package" — currently the user pipes through `jq`.
 - [ ] Baseline + diff mode. `--baseline` writes a snapshot; `--diff old.json

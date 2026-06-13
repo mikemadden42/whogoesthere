@@ -42,14 +42,13 @@ Each finding looks like:
 
 ```
 [systemd] systemd service ExecStart= (system)
-  source:  /etc/systemd/system/dbus-org.bluez.service
-  target:  /usr/libexec/bluetooth/bluetoothd
+  source:  /etc/systemd/system/display-manager.service
+  target:  /usr/bin/gdm
   scope:   system
   package: UNTRACKED
+  description: GNOME Display Manager
   directive: ExecStart
   location: system
-  service_type: dbus
-  wanted_by: bluetooth.target
 ```
 
 - `source` — the config file that defines the persistence
@@ -59,8 +58,8 @@ Each finding looks like:
 - `metadata` — checker-specific extras
 
 **`UNTRACKED` is the signal.** A persistence entry that no package owns is
-either user-edited (dotfiles), admin-installed (D-Bus aliases, custom
-units), or malware. Filter for it and triage:
+either user-edited (dotfiles), admin-installed (custom units, display-manager
+selection), or malware. Filter for it and triage:
 
 ```sh
 cargo run --release -- --format json | jq '[.[] | select(.package.status == "untracked")]'

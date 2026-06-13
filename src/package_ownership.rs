@@ -49,6 +49,40 @@ impl OwnershipIndex {
         }
         PackageOrigin::Untracked
     }
+
+    /// For paths matching a known distribution-shipped alias pattern, resolve
+    /// to the target path's owning package. Returns `(package, resolved_target)`
+    /// only if the symlink resolves AND lands on a package-owned file. A
+    /// malicious `dbus-org.*` symlink pointing at `/tmp/evil.service` would
+    /// not resolve to an owned target and stays `Untracked` — the security
+    /// property holds. Currently recognizes Fedora's
+    /// `/etc/systemd/system/dbus-org.*.service` D-Bus activation symlinks,
+    /// which are created at install time (not packaged) but alias to owned
+    /// unit files and reliably show up as the dominant UNTRACKED noise.
+    pub fn resolve_benign_alias(&self, path: &Path) -> Option<(String, PathBuf)> {
+        let files = self.files.as_ref()?;
+        if !is_fedora_dbus_alias(path) {
+            return None;
+        }
+        let target = path.canonicalize().ok()?;
+        let pkg = files.get(&target)?;
+        Some((pkg.clone(), target))
+    }
+}
+
+/// `/etc/systemd/{system,user}/dbus-org.<bus.name>.service` — the canonical
+/// Fedora shape for D-Bus activation aliases at both system and user scope.
+fn is_fedora_dbus_alias(path: &Path) -> bool {
+    let parent = path.parent();
+    if parent != Some(Path::new("/etc/systemd/system"))
+        && parent != Some(Path::new("/etc/systemd/user"))
+    {
+        return false;
+    }
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    name.starts_with("dbus-org.") && name.ends_with(".service")
 }
 
 fn detect() -> PackageManager {
@@ -225,5 +259,39 @@ mod tests {
         // The dir symlinks themselves (no trailing slash) are not rewritten —
         // only paths *under* them, which is what dpkg .list entries are.
         assert_eq!(merged_usr_rewrite(Path::new("/lib")), None);
+    }
+
+    #[test]
+    fn recognizes_dbus_org_aliases_at_both_scopes() {
+        assert!(is_fedora_dbus_alias(Path::new(
+            "/etc/systemd/system/dbus-org.bluez.service"
+        )));
+        assert!(is_fedora_dbus_alias(Path::new(
+            "/etc/systemd/system/dbus-org.freedesktop.Avahi.service"
+        )));
+        assert!(is_fedora_dbus_alias(Path::new(
+            "/etc/systemd/user/dbus-org.bluez.obex.service"
+        )));
+    }
+
+    #[test]
+    fn rejects_non_dbus_org_and_wrong_locations() {
+        // Wrong filename prefix.
+        assert!(!is_fedora_dbus_alias(Path::new(
+            "/etc/systemd/system/sshd.service"
+        )));
+        // Right prefix, wrong extension.
+        assert!(!is_fedora_dbus_alias(Path::new(
+            "/etc/systemd/system/dbus-org.bluez.timer"
+        )));
+        // Right shape, wrong directory — package dirs are off-limits because
+        // packages do own files there, and we'd shadow that attribution.
+        assert!(!is_fedora_dbus_alias(Path::new(
+            "/usr/lib/systemd/system/dbus-org.bluez.service"
+        )));
+        // Adjacent-but-different scope; only /etc/systemd/{system,user} match.
+        assert!(!is_fedora_dbus_alias(Path::new(
+            "/run/systemd/system/dbus-org.bluez.service"
+        )));
     }
 }
