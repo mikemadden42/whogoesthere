@@ -60,21 +60,36 @@
 
 ## Testing
 
-- [ ] **No unit tests exist anywhere in the tree.** The entire value of the
-      tool is parser correctness, and the riskiest logic is exactly the
-      parsing — all pure functions over `&str`, ideal for table-driven tests
-      with zero filesystem dependency. A silent parser regression produces
-      *wrong attribution* in a security tool, which is worse than a crash.
-      Highest-value targets:
-      - `udev::extract_with_prefixes` — manual byte-scanning with
-        earliest-match-wins prefix selection; subtle and completely
-        unexercised.
-      - `cron::parse_cron_line` — field counting, `@reboot` vs 5-field
-        schedules, env-var-line skipping, presence/absence of the user field.
-      - `systemd::parse_ini` and the timer/path/socket activation-resolution
-        logic (`activated_unit_name`).
-      - `package_ownership` dpkg/pacman/rpm index parsers — three of these are
-        already flagged "unverified on real data" elsewhere in this file.
+- [x] **No unit tests exist anywhere in the tree.** *Largely addressed.* All
+      four high-value parser targets now have unit-test coverage; the suite
+      stands at 31 tests across `systemd`, `udev`, `cron`, and
+      `package_ownership`:
+      - `udev::extract_with_prefixes` — 7 tests covering each assignment
+        operator variant (`+=`/`:=`/`=`), multiple directives per line, the
+        no-quote skip path, the unterminated-quote early return, the
+        substring-in-value false-positive guard, and the
+        `IMPORT{program}`-vs-`IMPORT{file,db,cmdline}` discrimination.
+      - `cron::parse_cron_line` — 6 tests covering the 5-field
+        with/without-user shapes, `@reboot` as a single-token schedule, blank
+        and comment skipping, env-var assignment skipping, and
+        truncated-input rejection.
+      - `systemd::parse_ini` and `activated_unit_name` — 6 tests covering
+        repeated-key list semantics (load-bearing for `emit_service`),
+        comment and blank handling, whitespace trimming, the
+        filename-stem-`.service` default, the explicit override, and
+        last-write-wins on repeated keys.
+      - `package_ownership` dpkg/pacman/rpm parsers — 6 tests after
+        extracting `parse_rpm_qf_output`, `dpkg_pkg_from_stem`,
+        `parse_dpkg_list_content`, and `parse_pacman_files_content` from
+        their respective `build_*_index` functions. Covers tab-split parsing
+        with format-drift tolerance, `:arch` stripping including multi-colon
+        edge cases, blank-line handling, `%FILES%` section gating including
+        multiple `%FILES%` headers, `%BACKUP%`/other-section rejection, and
+        the `/`-prefix prepending.
+      Remaining gaps are intentional: per-checker `run()` entry points still
+      touch the filesystem and aren't unit-testable without a temp-dir
+      framework; the merged-`/usr` rewrite and dbus-org alias discriminators
+      were already covered in prior commits.
 
 ## Performance
 

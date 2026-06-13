@@ -422,6 +422,106 @@ mod tests {
     }
 
     #[test]
+    fn parse_ini_captures_sections_and_repeated_keys() {
+        let content = "\
+[Unit]
+Description=My Service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/foo
+ExecStart=/usr/bin/bar
+";
+        let unit = parse_ini(content);
+        assert_eq!(
+            unit.get("Unit").unwrap().get("Description").unwrap(),
+            &vec!["My Service".to_string()]
+        );
+        assert_eq!(
+            unit.get("Service").unwrap().get("Type").unwrap(),
+            &vec!["simple".to_string()]
+        );
+        // ExecStart appears twice — both captured. The list-valued semantics
+        // are load-bearing for emit_service, which emits one finding per value.
+        assert_eq!(
+            unit.get("Service").unwrap().get("ExecStart").unwrap(),
+            &vec!["/usr/bin/foo".to_string(), "/usr/bin/bar".to_string()]
+        );
+    }
+
+    #[test]
+    fn parse_ini_skips_comments_blanks_and_pre_section_lines() {
+        let content = "\
+# hash comment outside any section
+; semicolon comment outside any section
+OrphanKeyBeforeSection=ignored
+
+[Service]
+# in-section hash comment
+; in-section semicolon comment
+
+ExecStart=/usr/bin/foo
+";
+        let unit = parse_ini(content);
+        // No phantom empty-named section from the orphan line.
+        assert!(!unit.contains_key(""));
+        assert_eq!(unit.len(), 1);
+        assert_eq!(
+            unit.get("Service").unwrap().get("ExecStart").unwrap(),
+            &vec!["/usr/bin/foo".to_string()]
+        );
+    }
+
+    #[test]
+    fn parse_ini_trims_whitespace_around_key_and_value() {
+        let content = "[Service]\n  ExecStart =   /usr/bin/foo  \n";
+        let unit = parse_ini(content);
+        assert_eq!(
+            unit.get("Service").unwrap().get("ExecStart").unwrap(),
+            &vec!["/usr/bin/foo".to_string()]
+        );
+    }
+
+    #[test]
+    fn activated_unit_name_defaults_to_filename_with_dot_service() {
+        let unit = Unit::new();
+        let path = Path::new("/etc/systemd/system/foo.timer");
+        assert_eq!(
+            activated_unit_name(&unit, path, "Timer", "Unit"),
+            Some("foo.service".to_string())
+        );
+    }
+
+    #[test]
+    fn activated_unit_name_honors_explicit_override() {
+        let mut unit = Unit::new();
+        let mut sec = Section::new();
+        sec.insert("Unit".to_string(), vec!["bar.service".to_string()]);
+        unit.insert("Timer".to_string(), sec);
+        let path = Path::new("/etc/systemd/system/foo.timer");
+        assert_eq!(
+            activated_unit_name(&unit, path, "Timer", "Unit"),
+            Some("bar.service".to_string())
+        );
+    }
+
+    #[test]
+    fn activated_unit_name_picks_last_when_key_repeats() {
+        let mut unit = Unit::new();
+        let mut sec = Section::new();
+        sec.insert(
+            "Service".to_string(),
+            vec!["first.service".to_string(), "last.service".to_string()],
+        );
+        unit.insert("Socket".to_string(), sec);
+        let path = Path::new("/etc/systemd/system/foo.socket");
+        assert_eq!(
+            activated_unit_name(&unit, path, "Socket", "Service"),
+            Some("last.service".to_string())
+        );
+    }
+
+    #[test]
     fn rejects_wants_requires_and_unsurveyed_unit_types() {
         // multi-user.target.wants/ and foo.service.wants/ are symlink farms,
         // not drop-ins.

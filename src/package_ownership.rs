@@ -113,14 +113,22 @@ fn build_rpm_index() -> Option<HashMap<PathBuf, String>> {
         return None;
     }
     let stdout = String::from_utf8_lossy(&out.stdout);
-    let mut map = HashMap::with_capacity(stdout.lines().size_hint().0);
-    for line in stdout.lines() {
-        let Some((pkg, path)) = line.split_once('\t') else {
-            continue;
-        };
-        map.insert(PathBuf::from(path), pkg.to_string());
-    }
+    let map: HashMap<PathBuf, String> = parse_rpm_qf_output(&stdout).into_iter().collect();
     if map.is_empty() { None } else { Some(map) }
+}
+
+/// Parse `rpm -qa --qf "...\t..."` output: one `<NVRA>\t<filename>\n` line per
+/// file. Lines without a tab are silently skipped — they shouldn't occur in
+/// well-formed output but the parser is tolerant of any rpm format drift that
+/// would otherwise crash the whole index build.
+fn parse_rpm_qf_output(stdout: &str) -> Vec<(PathBuf, String)> {
+    stdout
+        .lines()
+        .filter_map(|line| {
+            let (pkg, path) = line.split_once('\t')?;
+            Some((PathBuf::from(path), pkg.to_string()))
+        })
+        .collect()
 }
 
 /// dpkg: every installed package has a `/var/lib/dpkg/info/<pkg>.list` file
@@ -139,16 +147,11 @@ fn build_dpkg_index() -> Option<HashMap<PathBuf, String>> {
         let Some(stem) = name.strip_suffix(".list") else {
             continue;
         };
-        let pkg = stem.split(':').next().unwrap_or(stem).to_string();
+        let pkg = dpkg_pkg_from_stem(stem).to_string();
         let Ok(content) = fs::read_to_string(&path) else {
             continue;
         };
-        for line in content.lines() {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            let owned = PathBuf::from(line);
+        for owned in parse_dpkg_list_content(&content) {
             // On merged-/usr systems dpkg records the unmerged spelling
             // (/lib/...), but checkers canonicalize finding sources to the
             // merged spelling (/usr/lib/...). Key under both so lookups hit
@@ -160,6 +163,23 @@ fn build_dpkg_index() -> Option<HashMap<PathBuf, String>> {
         }
     }
     if map.is_empty() { None } else { Some(map) }
+}
+
+/// Strip `:arch` from a dpkg `.list` filename stem so the result matches what
+/// `dpkg -S` reports. `foo` → `foo`, `foo:amd64` → `foo`. Edge case:
+/// `foo:any:weird` → `foo` (we strip from the first colon).
+fn dpkg_pkg_from_stem(stem: &str) -> &str {
+    stem.split(':').next().unwrap_or(stem)
+}
+
+/// dpkg `.list` files are one absolute path per line; blank lines tolerated.
+fn parse_dpkg_list_content(content: &str) -> Vec<PathBuf> {
+    content
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(PathBuf::from)
+        .collect()
 }
 
 /// True on merged-`/usr` systems, where `/lib` is a symlink into `/usr/lib`
@@ -204,23 +224,33 @@ fn build_pacman_index() -> Option<HashMap<PathBuf, String>> {
         let Ok(content) = fs::read_to_string(dir.join("files")) else {
             continue;
         };
-        let mut in_files = false;
-        for line in content.lines() {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            if line.starts_with('%') && line.ends_with('%') {
-                in_files = line == "%FILES%";
-                continue;
-            }
-            if !in_files {
-                continue;
-            }
-            map.insert(PathBuf::from(format!("/{line}")), pkg.to_string());
+        for owned in parse_pacman_files_content(&content) {
+            map.insert(owned, pkg.to_string());
         }
     }
     if map.is_empty() { None } else { Some(map) }
+}
+
+/// Parse a pacman `files` file: extract one path per line from the `%FILES%`
+/// section, prepending `/` to make each absolute. Other section headers
+/// (`%BACKUP%` is the common one) gate `in_files` off.
+fn parse_pacman_files_content(content: &str) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let mut in_files = false;
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line.starts_with('%') && line.ends_with('%') {
+            in_files = line == "%FILES%";
+            continue;
+        }
+        if in_files {
+            out.push(PathBuf::from(format!("/{line}")));
+        }
+    }
+    out
 }
 
 fn which(prog: &str) -> bool {
@@ -272,6 +302,100 @@ mod tests {
         assert!(is_fedora_dbus_alias(Path::new(
             "/etc/systemd/user/dbus-org.bluez.obex.service"
         )));
+    }
+
+    #[test]
+    fn rpm_parser_pairs_each_line_on_tab() {
+        let stdout = "\
+bluez-5.86-4.fc44.x86_64\t/usr/lib/systemd/system/bluetooth.service
+coreutils-9.5-9.fc44.x86_64\t/usr/bin/ls
+coreutils-9.5-9.fc44.x86_64\t/usr/bin/cat
+";
+        let pairs = parse_rpm_qf_output(stdout);
+        assert_eq!(pairs.len(), 3);
+        assert!(pairs.contains(&(
+            PathBuf::from("/usr/bin/ls"),
+            "coreutils-9.5-9.fc44.x86_64".to_string()
+        )));
+        assert!(pairs.contains(&(
+            PathBuf::from("/usr/lib/systemd/system/bluetooth.service"),
+            "bluez-5.86-4.fc44.x86_64".to_string()
+        )));
+    }
+
+    #[test]
+    fn rpm_parser_skips_lines_without_tab_and_handles_empty_input() {
+        // Tolerates format drift / blank lines without crashing the whole
+        // index build.
+        let stdout = "no-tab-here\n\nfoo-1\t/bin/foo\n";
+        let pairs = parse_rpm_qf_output(stdout);
+        assert_eq!(
+            pairs,
+            vec![(PathBuf::from("/bin/foo"), "foo-1".to_string())]
+        );
+        assert!(parse_rpm_qf_output("").is_empty());
+    }
+
+    #[test]
+    fn dpkg_pkg_from_stem_strips_arch_suffix() {
+        assert_eq!(dpkg_pkg_from_stem("bash"), "bash");
+        assert_eq!(dpkg_pkg_from_stem("libfoo:amd64"), "libfoo");
+        // Multiple colons — strip everything from the first one.
+        assert_eq!(dpkg_pkg_from_stem("weird:any:thing"), "weird");
+        assert_eq!(dpkg_pkg_from_stem(""), "");
+    }
+
+    #[test]
+    fn dpkg_list_parser_one_path_per_line() {
+        let content = "/usr/bin/foo\n/etc/foo/config\n\n  /var/lib/foo  \n";
+        let paths = parse_dpkg_list_content(content);
+        assert_eq!(
+            paths,
+            vec![
+                PathBuf::from("/usr/bin/foo"),
+                PathBuf::from("/etc/foo/config"),
+                // Trims surrounding whitespace.
+                PathBuf::from("/var/lib/foo"),
+            ]
+        );
+        assert!(parse_dpkg_list_content("").is_empty());
+    }
+
+    #[test]
+    fn pacman_files_parser_only_picks_files_section_and_prepends_slash() {
+        let content = "%NAME%
+bluez
+
+%VERSION%
+5.86-4
+
+%FILES%
+usr/bin/bluetoothctl
+usr/lib/systemd/system/bluetooth.service
+
+%BACKUP%
+etc/bluetooth/main.conf\t<hash>
+
+%FILES%
+usr/share/man/man1/bluetoothctl.1.gz
+";
+        let paths = parse_pacman_files_content(content);
+        // Both %FILES% sections are picked up; %BACKUP% content is ignored;
+        // every path gains a leading slash.
+        assert_eq!(
+            paths,
+            vec![
+                PathBuf::from("/usr/bin/bluetoothctl"),
+                PathBuf::from("/usr/lib/systemd/system/bluetooth.service"),
+                PathBuf::from("/usr/share/man/man1/bluetoothctl.1.gz"),
+            ]
+        );
+    }
+
+    #[test]
+    fn pacman_files_parser_empty_when_no_files_section() {
+        let content = "%NAME%\nfoo\n\n%VERSION%\n1.0-1\n";
+        assert!(parse_pacman_files_content(content).is_empty());
     }
 
     #[test]

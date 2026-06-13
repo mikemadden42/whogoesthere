@@ -123,3 +123,85 @@ fn extract_with_prefixes(
         pos = val_start + close_offset + 1;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn extract_run(line: &str) -> Vec<(&'static str, String)> {
+        let mut out = Vec::new();
+        extract_with_prefixes(line, RUN_PREFIXES, "RUN", &mut out);
+        out
+    }
+
+    fn extract_import(line: &str) -> Vec<(&'static str, String)> {
+        let mut out = Vec::new();
+        extract_with_prefixes(line, IMPORT_PROGRAM_PREFIXES, "IMPORT{program}", &mut out);
+        out
+    }
+
+    #[test]
+    fn extracts_basic_run_directive() {
+        assert_eq!(
+            extract_run(r#"RUN+="/usr/bin/foo""#),
+            vec![("RUN", "/usr/bin/foo".to_string())]
+        );
+    }
+
+    #[test]
+    fn extracts_each_assignment_operator_variant() {
+        // +=, :=, = should all match — they're three legit udev assignment forms.
+        assert_eq!(extract_run(r#"RUN+="/a""#), vec![("RUN", "/a".to_string())]);
+        assert_eq!(extract_run(r#"RUN:="/b""#), vec![("RUN", "/b".to_string())]);
+        assert_eq!(extract_run(r#"RUN="/c""#), vec![("RUN", "/c".to_string())]);
+    }
+
+    #[test]
+    fn extracts_multiple_directives_on_the_same_line() {
+        // Real udev lines comma-separate match keys and assignments.
+        let r = extract_run(r#"KERNEL=="usb*", RUN+="/usr/bin/a", RUN+="/usr/bin/b""#);
+        assert_eq!(
+            r,
+            vec![
+                ("RUN", "/usr/bin/a".to_string()),
+                ("RUN", "/usr/bin/b".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn skips_directive_when_value_is_not_quoted() {
+        // A `RUN+=` not followed by `"` is malformed for our purposes — skip,
+        // don't try to guess. The next iteration advances past the bad match.
+        assert!(extract_run("RUN+=/usr/bin/foo").is_empty());
+    }
+
+    #[test]
+    fn does_not_false_positive_on_run_substring_inside_a_value() {
+        // The string `RUN+=` appearing inside a quoted command body must not
+        // produce a phantom second finding — `pos` advances past the closing
+        // quote so the inner text is never re-scanned.
+        let r = extract_run(r#"RUN+="echo RUN+=fake_inside_value""#);
+        assert_eq!(r, vec![("RUN", "echo RUN+=fake_inside_value".to_string())]);
+    }
+
+    #[test]
+    fn returns_early_on_unterminated_value_but_keeps_prior_extracts() {
+        // No closing quote on the second value — we lose that one but the
+        // first extract still lands.
+        let r = extract_run(r#"RUN+="/usr/bin/foo", RUN+="unterminated"#);
+        assert_eq!(r, vec![("RUN", "/usr/bin/foo".to_string())]);
+    }
+
+    #[test]
+    fn import_program_only_matches_the_program_variant() {
+        // IMPORT{file}=, IMPORT{db}=, IMPORT{cmdline}= etc. don't execute a
+        // binary, so only IMPORT{program}* is a persistence vector.
+        assert_eq!(
+            extract_import(r#"IMPORT{program}+="/usr/bin/foo""#),
+            vec![("IMPORT{program}", "/usr/bin/foo".to_string())]
+        );
+        assert!(extract_import(r#"IMPORT{file}="/etc/something""#).is_empty());
+        assert!(extract_import(r#"IMPORT{db}="ID_FOO""#).is_empty());
+    }
+}

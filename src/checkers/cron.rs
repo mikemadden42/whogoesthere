@@ -336,3 +336,61 @@ fn scan_at_jobs() -> Vec<Finding> {
     }
     findings
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn five_field_with_user_field() {
+        let c = parse_cron_line("0 * * * * root /usr/bin/foo --arg", true).expect("parses");
+        assert_eq!(c.schedule, "0 * * * *");
+        assert_eq!(c.user.as_deref(), Some("root"));
+        assert_eq!(c.command, "/usr/bin/foo --arg");
+    }
+
+    #[test]
+    fn five_field_user_field_absent_for_user_crontab() {
+        let c = parse_cron_line("*/5 * * * * /usr/bin/foo", false).expect("parses");
+        assert_eq!(c.schedule, "*/5 * * * *");
+        assert!(c.user.is_none());
+        assert_eq!(c.command, "/usr/bin/foo");
+    }
+
+    #[test]
+    fn at_reboot_schedule_single_token() {
+        // @reboot is the persistence-relevant special schedule; it must not
+        // consume four extra schedule tokens like a numeric schedule does.
+        let c = parse_cron_line("@reboot root /usr/bin/persist", true).expect("parses");
+        assert_eq!(c.schedule, "@reboot");
+        assert_eq!(c.user.as_deref(), Some("root"));
+        assert_eq!(c.command, "/usr/bin/persist");
+    }
+
+    #[test]
+    fn skip_blank_and_comment_lines() {
+        assert!(parse_cron_line("", true).is_none());
+        assert!(parse_cron_line("   ", true).is_none());
+        assert!(parse_cron_line("# comment", true).is_none());
+        assert!(parse_cron_line("   # indented comment", true).is_none());
+    }
+
+    #[test]
+    fn skip_env_var_assignment_lines() {
+        // SHELL=, PATH=, MAILTO=, HOME=, etc. — the env-var convention is
+        // "first whitespace token contains an `=`".
+        assert!(parse_cron_line("SHELL=/bin/bash", true).is_none());
+        assert!(parse_cron_line("PATH=/usr/bin:/bin", true).is_none());
+        assert!(parse_cron_line("MAILTO=root", false).is_none());
+    }
+
+    #[test]
+    fn require_complete_schedule_user_and_command() {
+        // Truncated 5-field schedule (only 4 tokens before command).
+        assert!(parse_cron_line("0 * * * /usr/bin/foo", false).is_none());
+        // Schedule but no command.
+        assert!(parse_cron_line("0 * * * *", false).is_none());
+        // has_user=true but no command after the user.
+        assert!(parse_cron_line("@reboot root", true).is_none());
+    }
+}
