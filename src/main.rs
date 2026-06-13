@@ -71,19 +71,19 @@ fn main() -> anyhow::Result<()> {
             if matches!(f.package, PackageOrigin::Unknown) {
                 f.package = index.owner(&f.source);
             }
-            // Recover attribution for `systemctl enable` (and D-Bus activation)
-            // symlinks under /etc/systemd/{system,user}/ that point back to a
-            // package-owned unit. A bogus symlink pointing at an unowned
-            // target (e.g. /tmp/evil.service) won't resolve to an owned file
-            // and stays UNTRACKED — the security property holds.
+            // Recover attribution for benign-symlink shapes — currently
+            // `systemctl enable` unit-file symlinks under
+            // /etc/systemd/{system,user}/, and /etc/profile.d/*.sh symlinks
+            // that postinst scripts drop pointing into /usr/share/. A bogus
+            // symlink pointing at an unowned target (e.g. /tmp/evil) won't
+            // resolve to an owned file and stays UNTRACKED — the security
+            // property holds for every pattern.
             if matches!(f.package, PackageOrigin::Untracked)
-                && let Some((pkg, target)) = index.resolve_benign_alias(&f.source)
+                && let Some((pkg, target, pattern)) = index.resolve_benign_alias(&f.source)
             {
                 f.package = PackageOrigin::Owned { package: pkg };
-                f.metadata.insert(
-                    "benign_pattern".to_string(),
-                    "systemd-enable-symlink".to_string(),
-                );
+                f.metadata
+                    .insert("benign_pattern".to_string(), pattern.to_string());
                 f.metadata
                     .insert("alias_target".to_string(), target.display().to_string());
             }

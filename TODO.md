@@ -276,6 +276,46 @@ ROI for adding more:
       for wrong-directory (`/usr/lib/systemd/system/`), wrong filename
       prefix, unsurveyed unit extensions (`.target`), and udev
       `99-foo.rules` / `70-snap.*.conf` shapes.
+- [x] **Symlink-resolve `/etc/profile.d/*.sh` to attribute through to the
+      target's owning package.** *Done.* `resolve_benign_alias` was
+      refactored to dispatch via a `benign_alias_pattern` predicate chain
+      that returns the matching pattern tag, so the same canonicalize +
+      lookup body now handles both `systemd-enable-symlink` and the new
+      `shell-profile-symlink` shape. The discriminator
+      `is_profile_d_symlink_candidate` matches any `*.sh` directly under
+      `/etc/profile.d/`. Security property holds across both patterns —
+      a malicious `/etc/profile.d/evil.sh → /tmp/evil.sh` won't
+      canonicalize to a package-owned target and stays UNTRACKED.
+      Diagnosed on Ubuntu 24.04: `/etc/profile.d/debuginfod.sh →
+      /usr/share/libdebuginfod-common/debuginfod.sh`, which should now
+      reattribute to `libdebuginfod-common`. Fedora effect: zero (Fedora's
+      `/etc/profile.d/*.sh` entries are real files, not symlinks; live
+      UNTRACKED still 13). Ubuntu effect predicted: 33 → 32 (just the one
+      symlink on this capture; the discriminator generalizes to any
+      future postinst-dropped `/etc/profile.d/*.sh → /usr/share/...`
+      symlink). 3 unit tests added: positive cases for `debuginfod.sh`
+      and `01-locale-fix.sh`; negative cases for `/etc/bash.bashrc`,
+      `/etc/profile.d/README` (no extension), `/etc/profile.d/foo.csh`
+      (wrong ext), `/usr/share/libdebuginfod-common/debuginfod.sh` (wrong
+      dir); dispatch test confirming `benign_alias_pattern` returns the
+      right tag for each shape.
+- [ ] **Known-postinst-generated allowlist for non-symlink files like
+      `/etc/profile`, `/etc/pam.d/common-*`, `/etc/modules`.** Diagnosed
+      on the Ubuntu 24.04 host: `/etc/profile` (582 bytes, mtime is Ubuntu
+      24.04's release date) is created by `base-files`'s postinst script,
+      not unpacked from the archive — dpkg-query reports no owner, and
+      it's not in `/var/lib/dpkg/info/base-files.list`. Same fundamental
+      mechanism as the PAM `common-*` files (libpam-runtime postinst) and
+      `/etc/modules` (kmod/initramfs-tools postinst). rpm includes
+      scriptlet-created files in its file database, which is why Fedora
+      doesn't show this entire bug class — this is the structural source
+      of the dpkg/rpm parity gap. Catalogue the small set of known
+      postinst-generated paths and attribute to their owning packages
+      with `installer: postinst-<pkgname>` metadata. Tractable scope:
+      `/etc/profile` → base-files, `/etc/pam.d/common-*` → libpam-runtime,
+      `/etc/modules` → kmod (or initramfs-tools depending on era). Combined
+      with the profile.d symlink fix above, takes Ubuntu UNTRACKED from
+      33 to ~9 — within Fedora's irreducible 13.
 - [ ] **Runtime-generated units under `/run/systemd/system/` from real
       packages (low priority, single-case so far).** The Ubuntu 24.04
       capture surfaced one such entry: `/run/systemd/system/

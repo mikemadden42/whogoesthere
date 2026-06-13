@@ -52,26 +52,31 @@ impl OwnershipIndex {
         PackageOrigin::Untracked
     }
 
-    /// For unit-file symlinks under `/etc/systemd/{system,user}` that
-    /// `systemctl enable` (or D-Bus activation) creates by linking back to a
-    /// package-owned `.service` / `.timer` / `.path` / `.socket` under
-    /// `/usr/lib/systemd/`, attribute the finding through to the target's
-    /// owning package. Returns `(package, resolved_target)` only if the
-    /// symlink resolves AND lands on a package-owned file. A malicious
-    /// `/etc/systemd/system/evil.service → /tmp/evil` would not resolve to
-    /// an owned target and stays `Untracked` — the security property holds.
-    /// Generalized from the original Fedora-specific `dbus-org.*` case after
-    /// the Ubuntu 24.04 baseline showed the same structural pattern across
-    /// every `systemctl enable` symlink (`sshd.service`, `samba.service`,
-    /// etc.).
-    pub fn resolve_benign_alias(&self, path: &Path) -> Option<(String, PathBuf)> {
+    /// For paths matching one of the known "benign symlink" shapes, resolve
+    /// to the canonical target's owning package. Returns
+    /// `(package, resolved_target, pattern_tag)` only if the symlink resolves
+    /// AND lands on a package-owned file. A malicious `→ /tmp/evil` doesn't
+    /// resolve to an owned target and stays `Untracked` — the security
+    /// property holds across all patterns.
+    ///
+    /// Currently recognized shapes:
+    ///   * `systemd-enable-symlink` —
+    ///     `/etc/systemd/{system,user}/<name>.{service,timer,path,socket}`
+    ///     that `systemctl enable` (or D-Bus activation) creates back into
+    ///     `/usr/lib/systemd/`. Originally added for Fedora's `dbus-org.*`
+    ///     aliases; generalized after the Ubuntu 24.04 baseline showed
+    ///     `sshd.service`, `samba.service`, etc. follow the same shape.
+    ///   * `shell-profile-symlink` — `/etc/profile.d/*.sh` symlinks that
+    ///     packages' postinst scripts create back into
+    ///     `/usr/share/<pkg>/...`. Added after the Ubuntu 24.04 diagnosis of
+    ///     `/etc/profile.d/debuginfod.sh →
+    ///     /usr/share/libdebuginfod-common/debuginfod.sh`.
+    pub fn resolve_benign_alias(&self, path: &Path) -> Option<(String, PathBuf, &'static str)> {
         let files = self.files.as_ref()?;
-        if !is_systemd_enable_symlink_candidate(path) {
-            return None;
-        }
+        let pattern = benign_alias_pattern(path)?;
         let target = path.canonicalize().ok()?;
         let pkg = files.get(&target)?;
-        Some((pkg.clone(), target))
+        Some((pkg.clone(), target, pattern))
     }
 
     /// For files that snapd emits at install time (and that dpkg therefore
@@ -95,6 +100,19 @@ impl OwnershipIndex {
     }
 }
 
+/// Try each known benign-symlink discriminator in turn; return the matching
+/// pattern tag (used as `benign_pattern` metadata on the reattributed
+/// finding) or `None` if no shape matches.
+fn benign_alias_pattern(path: &Path) -> Option<&'static str> {
+    if is_systemd_enable_symlink_candidate(path) {
+        return Some("systemd-enable-symlink");
+    }
+    if is_profile_d_symlink_candidate(path) {
+        return Some("shell-profile-symlink");
+    }
+    None
+}
+
 /// `/etc/systemd/{system,user}/<name>.{service,timer,path,socket}` — the
 /// shape of a unit-file alias that `systemctl enable` or D-Bus activation
 /// would create. Restricted to `/etc/systemd/...` because `/usr/lib/systemd/`
@@ -112,6 +130,18 @@ fn is_systemd_enable_symlink_candidate(path: &Path) -> bool {
         return false;
     };
     matches!(ext, "service" | "timer" | "path" | "socket")
+}
+
+/// `/etc/profile.d/<name>.sh` — shell-rc snippets that a package's postinst
+/// commonly symlinks back into `/usr/share/<pkg>/...`. The reattribution
+/// only fires if `canonicalize` lands on a path that's *itself* in the
+/// package index, so a malicious `/etc/profile.d/evil.sh → /tmp/evil.sh`
+/// stays UNTRACKED.
+fn is_profile_d_symlink_candidate(path: &Path) -> bool {
+    if path.parent() != Some(Path::new("/etc/profile.d")) {
+        return false;
+    }
+    path.extension().and_then(|e| e.to_str()) == Some("sh")
 }
 
 /// Extract the snap name from a path that follows one of the snapd-emitted
@@ -508,6 +538,58 @@ usr/share/man/man1/bluetoothctl.1.gz
     fn pacman_files_parser_empty_when_no_files_section() {
         let content = "%NAME%\nfoo\n\n%VERSION%\n1.0-1\n";
         assert!(parse_pacman_files_content(content).is_empty());
+    }
+
+    #[test]
+    fn profile_d_symlink_candidate_matches_sh_under_etc_profile_d() {
+        // The case that motivated this: libdebuginfod-common's postinst
+        // symlink, /etc/profile.d/debuginfod.sh →
+        // /usr/share/libdebuginfod-common/debuginfod.sh.
+        assert!(is_profile_d_symlink_candidate(Path::new(
+            "/etc/profile.d/debuginfod.sh"
+        )));
+        // Hyphens and digits in the basename are fine.
+        assert!(is_profile_d_symlink_candidate(Path::new(
+            "/etc/profile.d/01-locale-fix.sh"
+        )));
+    }
+
+    #[test]
+    fn profile_d_symlink_candidate_rejects_other_dirs_and_extensions() {
+        // Wrong directory — /etc/bash.bashrc is a real shell rc file but
+        // not where this pattern applies.
+        assert!(!is_profile_d_symlink_candidate(Path::new(
+            "/etc/bash.bashrc"
+        )));
+        // Right dir, no extension.
+        assert!(!is_profile_d_symlink_candidate(Path::new(
+            "/etc/profile.d/README"
+        )));
+        // Right dir, wrong extension.
+        assert!(!is_profile_d_symlink_candidate(Path::new(
+            "/etc/profile.d/debuginfod.csh"
+        )));
+        // Right shape but the package dir — packages do own .sh files
+        // under /usr/share/, and reattributing here would shadow that.
+        assert!(!is_profile_d_symlink_candidate(Path::new(
+            "/usr/share/libdebuginfod-common/debuginfod.sh"
+        )));
+    }
+
+    #[test]
+    fn benign_alias_pattern_dispatches_to_the_right_tag() {
+        // Systemd-unit shape returns the systemd tag.
+        assert_eq!(
+            benign_alias_pattern(Path::new("/etc/systemd/system/sshd.service")),
+            Some("systemd-enable-symlink")
+        );
+        // Profile.d shape returns the shell-profile tag.
+        assert_eq!(
+            benign_alias_pattern(Path::new("/etc/profile.d/debuginfod.sh")),
+            Some("shell-profile-symlink")
+        );
+        // Neither shape returns None.
+        assert_eq!(benign_alias_pattern(Path::new("/etc/passwd")), None);
     }
 
     #[test]
