@@ -265,6 +265,18 @@ ROI for adding more:
       (a) is a 30-minute win. Expected effect of (a) on Ubuntu: UNTRACKED
       ~32 → ~4 (only the user dotfiles, ssh keys, and `/etc/modules` left,
       which is the actual triage target set).
+- [ ] **Runtime-generated units under `/run/systemd/system/` from real
+      packages (low priority, single-case so far).** The Ubuntu 24.04
+      capture surfaced one such entry: `/run/systemd/system/
+      netplan-ovs-cleanup.service`, emitted at runtime by the `netplan.io`
+      deb. The current `is_systemd_enable_symlink_candidate` deliberately
+      rejects `/run/systemd/` (we don't want to silently attribute
+      arbitrary runtime-generated units to a real package), so this stays
+      UNTRACKED. A different mechanism could attribute by inspecting the
+      unit's `ExecStart` target against the package index — `/usr/sbin/
+      netplan` is owned by `netplan.io`. Not worth designing for until
+      more similar cases appear; revisit if the pattern shows up on
+      additional captures.
 - [ ] Baseline + diff mode. `--baseline` writes a snapshot; `--diff old.json
       new.json` shows additions/removals. The diff is the actually-useful
       detection signal in practice.
