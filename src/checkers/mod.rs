@@ -3,6 +3,7 @@ pub mod cron;
 pub mod init;
 pub mod ld_so;
 pub mod modules;
+pub mod pam;
 pub mod shell;
 pub mod ssh;
 pub mod systemd;

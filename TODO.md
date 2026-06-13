@@ -219,7 +219,26 @@ ROI for adding more:
       parser, the forced-command extractor, the whole-token boundary
       check, and the `sshd_config` directive stripper (both whitespace and
       `=` separators, case-insensitive key).
-- [ ] PAM: `/etc/pam.d/*` (auth-time module injection).
+- [x] PAM: `/etc/pam.d/*` (auth-time module injection). *Done — promoted
+      into the v1 checker matrix.* New `pam` checker walks `/etc/pam.d/`
+      and emits one finding per non-comment, non-blank line. Parser handles
+      the standard `<type> <control> <module-path> [args...]` shape, the
+      leading-dash type variants (`-auth`/etc., which silently skip if the
+      module is missing), and the bracketed `[key=value ...]` complex
+      control form. Metadata records service (filename), type, control,
+      line number, and module args. `include` and `substack` controls are
+      handled naturally — the next token is just recorded as the module
+      slot. Caveats: the older `@include filename` legacy form is
+      intentionally unsupported (didn't appear on the Fedora baseline);
+      tampering with an existing package-owned file still attributes the
+      finding to the package's owner — improving that requires resolving
+      module paths against the package index, which is left for follow-up.
+      9 unit tests cover the parser (minimal/with-args/leading-dash/
+      bracketed-control/include/whitespace-tolerance/comment-skip/
+      unknown-type-rejection/truncated-line-rejection). On this Fedora
+      box: 230 rules surfaced across all services in `/etc/pam.d/`, all
+      attributed to their owning packages — zero UNTRACKED, which is the
+      expected clean baseline.
 - [ ] D-Bus services: `/usr/share/dbus-1/services/`, `/etc/dbus-1/services/`
       (related to the systemd alias noise observed in v1).
 - [ ] Dynamic linker search path: `/etc/ld.so.conf.d/*.conf`.
