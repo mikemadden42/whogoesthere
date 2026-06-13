@@ -16,6 +16,15 @@ impl Checker for LdSoChecker {
         let mut findings = Vec::new();
         findings.extend(check_preload_file());
         findings.extend(check_environment_file());
+        findings.extend(scan_conf_file(Path::new("/etc/ld.so.conf")));
+        if let Ok(entries) = fs::read_dir("/etc/ld.so.conf.d") {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) == Some("conf") {
+                    findings.extend(scan_conf_file(&path));
+                }
+            }
+        }
         findings
     }
 }
@@ -63,4 +72,121 @@ fn check_environment_file() -> Vec<Finding> {
             }
         })
         .collect()
+}
+
+/// Walk one ld.so.conf-format file: blank/comment lines skipped, each bare
+/// path emits a search-path finding, each `include <glob>...` emits one
+/// finding per glob argument (typically just one). Used both for the
+/// top-level `/etc/ld.so.conf` and each `/etc/ld.so.conf.d/*.conf`. The
+/// malware signal here is an UNTRACKED `.conf` in `/etc/ld.so.conf.d/`
+/// containing a path the attacker controls — the loader will then prefer
+/// any `.so` planted there over the legitimate version (T1574.006).
+fn scan_conf_file(path: &Path) -> Vec<Finding> {
+    let Ok(content) = fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let mut findings = Vec::new();
+    for (lineno, raw) in content.lines().enumerate() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        findings.extend(parse_conf_line(line, path, lineno));
+    }
+    findings
+}
+
+fn parse_conf_line(line: &str, source: &Path, lineno: usize) -> Vec<Finding> {
+    let mut tokens = line.split_whitespace();
+    let Some(first) = tokens.next() else {
+        return Vec::new();
+    };
+    let (mechanism, targets): (&str, Vec<String>) = if first == "include" {
+        // `include <glob>...` — the rest of the tokens are file patterns
+        // pulled in. Surface each so an injected `include /tmp/evil.conf`
+        // is itself a visible finding.
+        (
+            "ld.so include directive (pulls in additional search-path config)",
+            tokens.map(str::to_string).collect(),
+        )
+    } else {
+        // Bare path line. Treat the entire line as the path (paths don't
+        // contain whitespace per the format spec; using `line` rather than
+        // `first` preserves any unusual input verbatim for the finding).
+        (
+            "ld.so search-path entry (adds directory to library lookup)",
+            vec![line.to_string()],
+        )
+    };
+    targets
+        .into_iter()
+        .map(|target| {
+            let mut metadata = BTreeMap::new();
+            metadata.insert("line".to_string(), (lineno + 1).to_string());
+            Finding {
+                category: "ld_so",
+                mechanism: mechanism.to_string(),
+                source: source.to_path_buf(),
+                target: Some(target),
+                scope: Scope::System,
+                package: PackageOrigin::Unknown,
+                metadata,
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(line: &str) -> Vec<Finding> {
+        parse_conf_line(line, Path::new("/etc/ld.so.conf.d/test.conf"), 0)
+    }
+
+    #[test]
+    fn bare_path_line_yields_one_search_path_finding() {
+        let f = parse("/usr/lib64/llvm21/lib64");
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].target.as_deref(), Some("/usr/lib64/llvm21/lib64"));
+        assert!(f[0].mechanism.contains("search-path entry"));
+    }
+
+    #[test]
+    fn include_directive_with_single_glob() {
+        let f = parse("include ld.so.conf.d/*.conf");
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].target.as_deref(), Some("ld.so.conf.d/*.conf"));
+        assert!(f[0].mechanism.contains("include directive"));
+    }
+
+    #[test]
+    fn include_directive_with_multiple_globs_emits_per_glob() {
+        // The spec allows multiple file patterns per include line; surface
+        // each so an injected extra arg is independently visible.
+        let f = parse("include /etc/a.conf /etc/b.conf /etc/c.conf");
+        assert_eq!(f.len(), 3);
+        let targets: Vec<&str> = f.iter().filter_map(|x| x.target.as_deref()).collect();
+        assert_eq!(targets, vec!["/etc/a.conf", "/etc/b.conf", "/etc/c.conf"]);
+    }
+
+    #[test]
+    fn scan_conf_file_skips_blank_and_comment_lines() {
+        // Write a synthetic temp file to exercise the full scan_conf_file path.
+        let tmp = std::env::temp_dir().join("whogoesthere-ldso-test.conf");
+        std::fs::write(
+            &tmp,
+            "# leading comment\n\
+             \n\
+             /opt/real/lib\n\
+             # mid comment\n\
+             /opt/another/lib\n",
+        )
+        .unwrap();
+        let f = scan_conf_file(&tmp);
+        let _ = std::fs::remove_file(&tmp);
+        assert_eq!(f.len(), 2);
+        assert_eq!(f[0].target.as_deref(), Some("/opt/real/lib"));
+        assert_eq!(f[1].target.as_deref(), Some("/opt/another/lib"));
+    }
 }

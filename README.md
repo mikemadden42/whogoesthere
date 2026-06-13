@@ -21,7 +21,7 @@ The `UNTRACKED` flag on a finding is the primary malware signal.
 | `autostart` | XDG `.desktop` autostart entries: `/etc/xdg/autostart/` system-wide and `~/.config/autostart/` per user. Hidden/disabled flags surfaced. |
 | `udev`      | `RUN+=` and `IMPORT{program}=` directives across `/etc/udev/rules.d/`, `/run/udev/rules.d/`, `/lib/udev/rules.d/`, `/usr/lib/udev/rules.d/`. |
 | `modules`   | `/etc/modules` (Debian legacy), `modules-load.d/*.conf`, and `modprobe.d/*.conf` — with special focus on `install <module> <command>` directives, which run arbitrary commands. |
-| `ld_so`     | `/etc/ld.so.preload` and `LD_PRELOAD` in `/etc/environment`. |
+| `ld_so`     | `/etc/ld.so.preload`, `LD_PRELOAD` in `/etc/environment`, and the per-directory search-path config — `/etc/ld.so.conf` plus `/etc/ld.so.conf.d/*.conf`. Each search-path entry and `include` directive emits a finding so an UNTRACKED `.conf` in `ld.so.conf.d/` adding an attacker-controlled directory (T1574.006-class library hijacking) is independently surfaced. |
 | `ssh`       | Per-user `~/.ssh/authorized_keys` (one finding per key, with `forced_command` surfaced when `command="..."` is set), per-user `~/.ssh/rc` and system `/etc/ssh/sshrc` login scripts, `ForceCommand` and `AuthorizedKeysCommand` in `/etc/ssh/sshd_config` and `sshd_config.d/*.conf` (with `Match` block context as metadata). |
 | `pam`       | One finding per non-comment line in `/etc/pam.d/*` — type (auth/account/password/session, plus leading-dash variants), control (including bracketed `[key=value ...]` form), module path, and module args surfaced as metadata. PAM runs at every authentication (console, GUI, sudo, su, cron, screen unlock) so module injection here is one of the broadest persistence vectors on Linux. |
 
@@ -76,7 +76,7 @@ cargo run --release -- --untracked-only --format json
 
 ## Performance
 
-A full run on Fedora 44 (1583 findings across all ten checkers) takes
+A full run on Fedora 44 (1588 findings across all ten checkers) takes
 ~0.7s. Package-ownership attribution is the hot path; it's done once at
 startup by ingesting the entire `rpm` / `dpkg` / `pacman` file index into
 a hash map, then served as O(1) lookups against each finding's source path.
@@ -127,8 +127,8 @@ cargo clippy --release --all-targets --all-features -- -Dwarnings -Adeprecated
 v1 is feature-complete for the ten checkers above. Tested on Fedora 44.
 Debian/Ubuntu validation pending. See [TODO.md](TODO.md) for the follow-up
 backlog: distro coverage, baseline+diff mode, and the remaining v2 vector
-list (D-Bus, dynamic linker, display manager, dispatcher scripts,
-package-manager hooks).
+list (D-Bus services, display manager, dispatcher scripts, package-manager
+hooks).
 
 ## Why the name?
 

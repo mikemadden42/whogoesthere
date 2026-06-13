@@ -241,7 +241,22 @@ ROI for adding more:
       expected clean baseline.
 - [ ] D-Bus services: `/usr/share/dbus-1/services/`, `/etc/dbus-1/services/`
       (related to the systemd alias noise observed in v1).
-- [ ] Dynamic linker search path: `/etc/ld.so.conf.d/*.conf`.
+- [x] Dynamic linker search path: `/etc/ld.so.conf.d/*.conf`. *Done — folded
+      into the existing `ld_so` checker.* New `scan_conf_file` walks both
+      the top-level `/etc/ld.so.conf` and every `*.conf` under
+      `/etc/ld.so.conf.d/`. Each non-blank, non-`#`-comment line emits a
+      finding: a bare path produces a "search-path entry" finding, and an
+      `include <glob>...` line produces one "include directive" finding
+      per glob argument (so an injected `include /tmp/evil.conf` is itself
+      visible without recursing into it). Source is the conf file itself,
+      so package-ownership attribution flags an UNTRACKED `.conf` in
+      `ld.so.conf.d/` — the malware-side of T1574.006-class library
+      hijacking, where the attacker drops a conf that adds an
+      attacker-controlled directory ahead of the legitimate search path.
+      4 unit tests cover bare paths, single-glob include, multi-glob
+      include, and the comment/blank skip path via a synthetic temp file.
+      On this Fedora box: 5 ld_so findings total, all package-attributed,
+      zero UNTRACKED — clean baseline.
 - [ ] Display-manager session hooks: gdm/sddm/lightdm Xsession scripts;
       `~/.xsession`, `~/.xinitrc`, `~/.xprofile`.
 - [ ] NetworkManager dispatcher scripts: `/etc/NetworkManager/dispatcher.d/`.
