@@ -71,18 +71,18 @@ fn main() -> anyhow::Result<()> {
             if matches!(f.package, PackageOrigin::Unknown) {
                 f.package = index.owner(&f.source);
             }
-            // Recover attribution for known-benign alias patterns (currently
-            // Fedora's dbus-org.*.service activation symlinks): if the symlink
-            // resolves to a package-owned target, attribute through it and
-            // tag for filtering. A bogus dbus-org.* alias pointing at an
-            // unowned target stays UNTRACKED.
+            // Recover attribution for `systemctl enable` (and D-Bus activation)
+            // symlinks under /etc/systemd/{system,user}/ that point back to a
+            // package-owned unit. A bogus symlink pointing at an unowned
+            // target (e.g. /tmp/evil.service) won't resolve to an owned file
+            // and stays UNTRACKED — the security property holds.
             if matches!(f.package, PackageOrigin::Untracked)
                 && let Some((pkg, target)) = index.resolve_benign_alias(&f.source)
             {
                 f.package = PackageOrigin::Owned { package: pkg };
                 f.metadata.insert(
                     "benign_pattern".to_string(),
-                    "fedora-dbus-alias".to_string(),
+                    "systemd-enable-symlink".to_string(),
                 );
                 f.metadata
                     .insert("alias_target".to_string(), target.display().to_string());

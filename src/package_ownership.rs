@@ -50,18 +50,21 @@ impl OwnershipIndex {
         PackageOrigin::Untracked
     }
 
-    /// For paths matching a known distribution-shipped alias pattern, resolve
-    /// to the target path's owning package. Returns `(package, resolved_target)`
-    /// only if the symlink resolves AND lands on a package-owned file. A
-    /// malicious `dbus-org.*` symlink pointing at `/tmp/evil.service` would
-    /// not resolve to an owned target and stays `Untracked` — the security
-    /// property holds. Currently recognizes Fedora's
-    /// `/etc/systemd/system/dbus-org.*.service` D-Bus activation symlinks,
-    /// which are created at install time (not packaged) but alias to owned
-    /// unit files and reliably show up as the dominant UNTRACKED noise.
+    /// For unit-file symlinks under `/etc/systemd/{system,user}` that
+    /// `systemctl enable` (or D-Bus activation) creates by linking back to a
+    /// package-owned `.service` / `.timer` / `.path` / `.socket` under
+    /// `/usr/lib/systemd/`, attribute the finding through to the target's
+    /// owning package. Returns `(package, resolved_target)` only if the
+    /// symlink resolves AND lands on a package-owned file. A malicious
+    /// `/etc/systemd/system/evil.service → /tmp/evil` would not resolve to
+    /// an owned target and stays `Untracked` — the security property holds.
+    /// Generalized from the original Fedora-specific `dbus-org.*` case after
+    /// the Ubuntu 24.04 baseline showed the same structural pattern across
+    /// every `systemctl enable` symlink (`sshd.service`, `samba.service`,
+    /// etc.).
     pub fn resolve_benign_alias(&self, path: &Path) -> Option<(String, PathBuf)> {
         let files = self.files.as_ref()?;
-        if !is_fedora_dbus_alias(path) {
+        if !is_systemd_enable_symlink_candidate(path) {
             return None;
         }
         let target = path.canonicalize().ok()?;
@@ -70,19 +73,23 @@ impl OwnershipIndex {
     }
 }
 
-/// `/etc/systemd/{system,user}/dbus-org.<bus.name>.service` — the canonical
-/// Fedora shape for D-Bus activation aliases at both system and user scope.
-fn is_fedora_dbus_alias(path: &Path) -> bool {
+/// `/etc/systemd/{system,user}/<name>.{service,timer,path,socket}` — the
+/// shape of a unit-file alias that `systemctl enable` or D-Bus activation
+/// would create. Restricted to `/etc/systemd/...` because `/usr/lib/systemd/`
+/// is the package-owned side; reattributing there would shadow real ownership.
+/// `/run/systemd/...` is also excluded — it's runtime-generated and we don't
+/// want to silently attribute generated units to a real package.
+fn is_systemd_enable_symlink_candidate(path: &Path) -> bool {
     let parent = path.parent();
     if parent != Some(Path::new("/etc/systemd/system"))
         && parent != Some(Path::new("/etc/systemd/user"))
     {
         return false;
     }
-    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+    let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
         return false;
     };
-    name.starts_with("dbus-org.") && name.ends_with(".service")
+    matches!(ext, "service" | "timer" | "path" | "socket")
 }
 
 fn detect() -> PackageManager {
@@ -292,15 +299,33 @@ mod tests {
     }
 
     #[test]
-    fn recognizes_dbus_org_aliases_at_both_scopes() {
-        assert!(is_fedora_dbus_alias(Path::new(
+    fn recognizes_systemd_enable_symlinks_at_both_scopes() {
+        // The original Fedora dbus-org.* cases.
+        assert!(is_systemd_enable_symlink_candidate(Path::new(
             "/etc/systemd/system/dbus-org.bluez.service"
         )));
-        assert!(is_fedora_dbus_alias(Path::new(
-            "/etc/systemd/system/dbus-org.freedesktop.Avahi.service"
-        )));
-        assert!(is_fedora_dbus_alias(Path::new(
+        assert!(is_systemd_enable_symlink_candidate(Path::new(
             "/etc/systemd/user/dbus-org.bluez.obex.service"
+        )));
+        // The Ubuntu `systemctl enable` cases that motivated generalizing.
+        assert!(is_systemd_enable_symlink_candidate(Path::new(
+            "/etc/systemd/system/sshd.service"
+        )));
+        assert!(is_systemd_enable_symlink_candidate(Path::new(
+            "/etc/systemd/system/display-manager.service"
+        )));
+        assert!(is_systemd_enable_symlink_candidate(Path::new(
+            "/etc/systemd/system/iscsi.service"
+        )));
+        // Non-.service unit types are also enableable.
+        assert!(is_systemd_enable_symlink_candidate(Path::new(
+            "/etc/systemd/system/logrotate.timer"
+        )));
+        assert!(is_systemd_enable_symlink_candidate(Path::new(
+            "/etc/systemd/system/systemd-journald.socket"
+        )));
+        assert!(is_systemd_enable_symlink_candidate(Path::new(
+            "/etc/systemd/system/foo.path"
         )));
     }
 
@@ -399,23 +424,34 @@ usr/share/man/man1/bluetoothctl.1.gz
     }
 
     #[test]
-    fn rejects_non_dbus_org_and_wrong_locations() {
-        // Wrong filename prefix.
-        assert!(!is_fedora_dbus_alias(Path::new(
-            "/etc/systemd/system/sshd.service"
+    fn rejects_wrong_extension_and_wrong_directories() {
+        // Extensions we don't survey aren't enableable units in the
+        // persistence sense, so we don't reattribute through them.
+        assert!(!is_systemd_enable_symlink_candidate(Path::new(
+            "/etc/systemd/system/foo.conf"
         )));
-        // Right prefix, wrong extension.
-        assert!(!is_fedora_dbus_alias(Path::new(
-            "/etc/systemd/system/dbus-org.bluez.timer"
+        assert!(!is_systemd_enable_symlink_candidate(Path::new(
+            "/etc/systemd/system/foo.target"
         )));
-        // Right shape, wrong directory — package dirs are off-limits because
-        // packages do own files there, and we'd shadow that attribution.
-        assert!(!is_fedora_dbus_alias(Path::new(
-            "/usr/lib/systemd/system/dbus-org.bluez.service"
+        // Missing extension entirely.
+        assert!(!is_systemd_enable_symlink_candidate(Path::new(
+            "/etc/systemd/system/foo"
         )));
-        // Adjacent-but-different scope; only /etc/systemd/{system,user} match.
-        assert!(!is_fedora_dbus_alias(Path::new(
-            "/run/systemd/system/dbus-org.bluez.service"
+        // Package dirs are off-limits — packages do own files there, and
+        // reattributing would shadow real ownership.
+        assert!(!is_systemd_enable_symlink_candidate(Path::new(
+            "/usr/lib/systemd/system/sshd.service"
+        )));
+        assert!(!is_systemd_enable_symlink_candidate(Path::new(
+            "/lib/systemd/system/sshd.service"
+        )));
+        // Runtime-generated dir; never the right side to reattribute *from*.
+        assert!(!is_systemd_enable_symlink_candidate(Path::new(
+            "/run/systemd/system/foo.service"
+        )));
+        // Drop-in conf inside a unit's `.d` dir, not a unit-file itself.
+        assert!(!is_systemd_enable_symlink_candidate(Path::new(
+            "/etc/systemd/system/sshd.service.d/override.conf"
         )));
     }
 }
