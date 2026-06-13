@@ -167,8 +167,15 @@ ROI for adding more:
       user-global scope). Unit-tested via `is_fedora_dbus_alias` cases for
       both scopes plus rejection of wrong-prefix, wrong-extension, and
       wrong-directory shapes.
-- [ ] `--untracked-only` flag. The malware-detection workflow is "show me
+- [x] `--untracked-only` flag. The malware-detection workflow is "show me
       what's not in any package" — currently the user pipes through `jq`.
+      *Done.* New `Cli::untracked_only` bool; when set, the post-attribution
+      pass in `main` retains only findings whose `package` is `Untracked`.
+      Works for both text and JSON output, plays nicely with `--checker`
+      narrowing, and falls through to the existing "no findings" branch when
+      the filter empties the set. README updated to show
+      `whogoesthere --untracked-only` in both the Usage and the
+      malware-triage section, replacing the documented `jq` pipeline.
 - [ ] Baseline + diff mode. `--baseline` writes a snapshot; `--diff old.json
       new.json` shows additions/removals. The diff is the actually-useful
       detection signal in practice.

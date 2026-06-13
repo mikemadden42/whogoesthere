@@ -34,6 +34,9 @@ cargo run --release -- --format json
 
 # Just one checker (repeatable)
 cargo run --release -- --checker systemd --checker cron
+
+# Only entries no package owns — the malware-triage signal
+cargo run --release -- --untracked-only
 ```
 
 ## Reading the output
@@ -62,7 +65,8 @@ either user-edited (dotfiles), admin-installed (custom units, display-manager
 selection), or malware. Filter for it and triage:
 
 ```sh
-cargo run --release -- --format json | jq '[.[] | select(.package.status == "untracked")]'
+cargo run --release -- --untracked-only
+cargo run --release -- --untracked-only --format json
 ```
 
 ## Performance

@@ -18,6 +18,10 @@ struct Cli {
     /// Only run the named checker (repeatable). Default: all.
     #[arg(long = "checker", value_name = "NAME")]
     only: Vec<String>,
+
+    /// Show only findings no package owns — the malware-triage signal.
+    #[arg(long)]
+    untracked_only: bool,
 }
 
 #[derive(Clone, ValueEnum)]
@@ -70,6 +74,10 @@ fn main() -> anyhow::Result<()> {
             }
         }
         findings.extend(chunk);
+    }
+
+    if cli.untracked_only {
+        findings.retain(|f| matches!(f.package, PackageOrigin::Untracked));
     }
 
     match cli.format {
