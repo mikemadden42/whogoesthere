@@ -1,3 +1,4 @@
+pub mod apt_hooks;
 pub mod autostart;
 pub mod cron;
 pub mod dbus;

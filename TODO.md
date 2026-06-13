@@ -490,7 +490,36 @@ ROI for adding more:
       the executable + metadata path via tempdirs, the non-executable
       note path, dotfile/`*~` skip, phase metadata + distinct
       mechanism for sub-dirs, and the missing-directory no-op.
-- [ ] APT/DNF hooks: `/etc/apt/apt.conf.d/`, `/etc/dnf/plugins/`.
+- [x] APT/DNF hooks: `/etc/apt/apt.conf.d/`, `/etc/dnf/plugins/`. *Partial
+      — APT hooks done, DNF deferred as its own item.* New `apt_hooks`
+      checker walks `/etc/apt/apt.conf` and every non-dotfile,
+      non-`*~` file under `/etc/apt/apt.conf.d/`. Recognizes seven
+      persistence-relevant directives — `DPkg::Pre-Install-Pkgs`,
+      `DPkg::Pre-Invoke`, `DPkg::Post-Invoke`,
+      `DPkg::Post-Invoke-Success`, `APT::Update::Pre-Invoke`,
+      `APT::Update::Post-Invoke`, `APT::Update::Post-Invoke-Success` —
+      and extracts every shell command they hold across all three
+      apt.conf surface forms: single-value (`<dir> "cmd";`), append-
+      list (`<dir>:: "cmd";`), and block (`<dir> { "cmd1"; "cmd2"; };`).
+      Comment stripper handles `//`, `/* */`, and `#` while leaving
+      quoted strings intact (a literal `//` inside a command body
+      survives). Boundary check distinguishes `DPkg::Pre-Invoke::Foo`
+      (namespace continuation, not our directive) from
+      `DPkg::Pre-Invoke::` (append-list operator, our directive plus
+      `::`). One finding per command with the directive name as
+      metadata. Live Fedora 44: zero findings (no apt; checker
+      no-ops cleanly). 11 unit tests cover each value form, comment
+      handling including `//` inside quotes, partial-match rejection,
+      namespace-continuation rejection, escaped-quote handling,
+      nested-braces-in-value, repeated-directive emission, and empty.
+      Known limitation: the hierarchical nested form
+      (`DPkg { Pre-Invoke "cmd"; }`) is not parsed — every Ubuntu
+      vendor file we have data for uses the flat form; revisit if a
+      real-world driver appears. DNF side intentionally deferred:
+      `/etc/dnf/plugins/*.conf` only enables plugins, the actual hook
+      logic lives in plugin Python source; the right Fedora analog
+      is probably rpm scriptlet enumeration (`%pre`/`%post`/etc.) but
+      that's a structurally different design.
 
 ## Parser edge cases
 

@@ -72,6 +72,7 @@ fn main() -> anyhow::Result<()> {
         Box::new(checkers::dbus::DbusChecker),
         Box::new(checkers::network_manager::NetworkManagerChecker),
         Box::new(checkers::display_manager::DisplayManagerChecker),
+        Box::new(checkers::apt_hooks::AptHooksChecker),
     ];
 
     if cli.list_checkers {
