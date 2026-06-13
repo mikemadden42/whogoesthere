@@ -4,7 +4,10 @@ use std::path::{Path, PathBuf};
 
 use crate::checker::Checker;
 use crate::finding::{Finding, PackageOrigin, Scope};
-use crate::util::{canonical_unique, real_users};
+use crate::util::{IniDoc, IniSection, canonical_unique, parse_ini, real_users};
+
+type Section = IniSection;
+type Unit = IniDoc;
 
 pub struct SystemdChecker;
 
@@ -162,36 +165,6 @@ fn scan_dropin_dir(
         findings.extend(emitted);
     }
     findings
-}
-
-// ─── INI parser ──────────────────────────────────────────────────────────────
-
-type Section = BTreeMap<String, Vec<String>>;
-type Unit = BTreeMap<String, Section>;
-
-fn parse_ini(content: &str) -> Unit {
-    let mut unit: Unit = BTreeMap::new();
-    let mut current: Option<String> = None;
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
-            continue;
-        }
-        if trimmed.starts_with('[') && trimmed.ends_with(']') {
-            current = Some(trimmed[1..trimmed.len() - 1].to_string());
-            continue;
-        }
-        let Some(section) = &current else { continue };
-        let Some((key, value)) = trimmed.split_once('=') else {
-            continue;
-        };
-        unit.entry(section.clone())
-            .or_default()
-            .entry(key.trim().to_string())
-            .or_default()
-            .push(value.trim().to_string());
-    }
-    unit
 }
 
 // ─── finding emission per unit type ──────────────────────────────────────────

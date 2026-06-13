@@ -1,7 +1,49 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use uzers::os::unix::UserExt;
+
+/// One section of an INI-like document: keys map to a list of values,
+/// preserving order of repeats. List-valued semantics are load-bearing for
+/// systemd's `ExecStart=` directives (which may appear multiple times) and
+/// any other key that the consumer wants to iterate.
+pub type IniSection = BTreeMap<String, Vec<String>>;
+
+/// An entire INI-like document: section name → section. Used by the systemd
+/// unit-file parser and the D-Bus service-file parser. Both formats share the
+/// same lexical shape: `[Section]` headers, `key = value` lines, `#`/`;`
+/// full-line comments, and tolerance of repeated keys.
+pub type IniDoc = BTreeMap<String, IniSection>;
+
+/// Parse an INI-like document. Blank lines and `#`/`;` full-line comments
+/// are skipped. `[name]` opens a section; subsequent `key = value` lines
+/// land in it (trimmed). Repeated keys accumulate into the value list in
+/// source order. Lines before any section, or `key=value` lines outside a
+/// section, are silently ignored.
+pub fn parse_ini(content: &str) -> IniDoc {
+    let mut doc: IniDoc = BTreeMap::new();
+    let mut current: Option<String> = None;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            current = Some(trimmed[1..trimmed.len() - 1].to_string());
+            continue;
+        }
+        let Some(section) = &current else { continue };
+        let Some((key, value)) = trimmed.split_once('=') else {
+            continue;
+        };
+        doc.entry(section.clone())
+            .or_default()
+            .entry(key.trim().to_string())
+            .or_default()
+            .push(value.trim().to_string());
+    }
+    doc
+}
 
 /// Canonicalize each path (resolving symlinks like `/lib` → `/usr/lib`) and
 /// return the unique set in input order. Paths that fail to canonicalize
