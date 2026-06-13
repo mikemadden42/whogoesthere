@@ -250,21 +250,32 @@ ROI for adding more:
       reattribute. Option (a) is one branch in `pam::scan_pam_file`;
       option (b) needs grep-equivalent across pam-configs files. Start with
       (a). Expected effect: Ubuntu UNTRACKED ~54 → ~32.
-- [ ] **snapd attribution backend or `snap.*` pattern tag.** Snap-generated
-      files (systemd units under `/etc/systemd/{system,user}/snap.*` and
-      udev rules under `/etc/udev/rules.d/70-snap.*.rules`) are the single
-      largest noise class on Ubuntu — ~28 of 84 UNTRACKED in the 24.04
-      capture. They're genuinely not in the dpkg index because snapd
-      installs them outside dpkg. Two options: (a) cheap — pattern-tag any
-      `snap.*` source path with `installer: snapd` metadata, leave the
-      package status as UNTRACKED but make the noise class trivially
-      filterable; (b) full — add a snapd backend that reads
-      `/var/lib/snapd/...` to build a snap-package ownership index and
-      attribute via `PackageOrigin::Owned { package: "snap:<name>" }`.
-      (b) is the higher-ROI fix given Ubuntu's snap density in 2026, but
-      (a) is a 30-minute win. Expected effect of (a) on Ubuntu: UNTRACKED
-      ~32 → ~4 (only the user dotfiles, ssh keys, and `/etc/modules` left,
-      which is the actual triage target set).
+- [x] **snapd attribution backend.** *Done — option (b), the count-reducing
+      one.* New `OwnershipIndex::resolve_snap_attribution` pre-scans both
+      `/snap/<name>/` (directory layout, skipping the `bin/` shim) and
+      `/var/lib/snapd/snaps/<name>_<rev>.snap` (blob layout) at startup
+      and caches the installed snap names. The matching `extract_snap_name`
+      parser recognizes two emitted shapes:
+        * `/etc/systemd/{system,user}/snap.<snap>.<app>.<service|timer|path|socket>`
+        * `/etc/udev/rules.d/70-snap.<snap>.rules`
+      Both pick the 2nd dot-separated component as the snap name (safe
+      because snapcraft restricts names to `[a-z0-9-]`). The attribution
+      pass in `main.rs` only fires when the extracted name is in the
+      pre-scanned set, so a malicious `snap.evil.payload.service` with no
+      installed `evil` snap stays UNTRACKED — the security property holds.
+      Attributed findings emit `PackageOrigin::Owned { package:
+      "snap:<name>" }` and gain `installer: snapd` metadata so they're
+      trivially filterable. Fedora effect: zero (no `/snap`, probe
+      no-ops). Ubuntu effect: predicted 60 → ~32 UNTRACKED collapsing the
+      13 systemd + 15 udev snap entries; pending a live-host re-run to
+      confirm. 3 unit tests cover the parser: positive cases for
+      `snap.cups.cupsd.service`, `snap.mesa-2404.component-monitor.service`,
+      `snap.firmware-updater.firmware-notifier.timer`,
+      `snap.snapd-desktop-integration.snapd-desktop-integration.service`,
+      `70-snap.chromium.rules`, `70-snap.snap-store.rules`; negative cases
+      for wrong-directory (`/usr/lib/systemd/system/`), wrong filename
+      prefix, unsurveyed unit extensions (`.target`), and udev
+      `99-foo.rules` / `70-snap.*.conf` shapes.
 - [ ] **Runtime-generated units under `/run/systemd/system/` from real
       packages (low priority, single-case so far).** The Ubuntu 24.04
       capture surfaced one such entry: `/run/systemd/system/

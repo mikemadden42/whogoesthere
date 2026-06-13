@@ -87,6 +87,17 @@ fn main() -> anyhow::Result<()> {
                 f.metadata
                     .insert("alias_target".to_string(), target.display().to_string());
             }
+            // Attribute snapd-emitted files (snap.<name>.<app>.service|.timer
+            // and 70-snap.<name>.rules) to their owning snap, but only if the
+            // snap is actually installed — an attacker dropping a file with
+            // that shape pointing at a non-existent snap stays UNTRACKED.
+            if matches!(f.package, PackageOrigin::Untracked)
+                && let Some(pkg) = index.resolve_snap_attribution(&f.source)
+            {
+                f.package = PackageOrigin::Owned { package: pkg };
+                f.metadata
+                    .insert("installer".to_string(), "snapd".to_string());
+            }
         }
         findings.extend(chunk);
     }

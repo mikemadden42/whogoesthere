@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -10,6 +10,7 @@ use crate::finding::PackageOrigin;
 /// of `rpm -qf` / `dpkg -S` / `pacman -Qo` forks.
 pub struct OwnershipIndex {
     files: Option<HashMap<PathBuf, String>>,
+    snaps: Option<HashSet<String>>,
 }
 
 enum PackageManager {
@@ -27,7 +28,8 @@ impl OwnershipIndex {
             PackageManager::Pacman => build_pacman_index(),
             PackageManager::None => None,
         };
-        Self { files }
+        let snaps = build_snap_set();
+        Self { files, snaps }
     }
 
     /// Returns the package that owns `path`, or `Untracked` if no package
@@ -71,6 +73,26 @@ impl OwnershipIndex {
         let pkg = files.get(&target)?;
         Some((pkg.clone(), target))
     }
+
+    /// For files that snapd emits at install time (and that dpkg therefore
+    /// doesn't index), attribute through to the owning snap by parsing the
+    /// filename pattern and confirming the snap is actually installed. Returns
+    /// the `snap:<name>` identifier. A malicious
+    /// `/etc/systemd/system/snap.evil.payload.service` with no matching snap
+    /// installed wouldn't satisfy the install check and stays `Untracked` —
+    /// the security property holds. Currently recognizes:
+    ///   * `/etc/systemd/{system,user}/snap.<snap>.<app>.<ext>` (service,
+    ///     timer, path, socket)
+    ///   * `/etc/udev/rules.d/70-snap.<snap>.rules`
+    pub fn resolve_snap_attribution(&self, path: &Path) -> Option<String> {
+        let snaps = self.snaps.as_ref()?;
+        let name = extract_snap_name(path)?;
+        if snaps.contains(name.as_str()) {
+            Some(format!("snap:{name}"))
+        } else {
+            None
+        }
+    }
 }
 
 /// `/etc/systemd/{system,user}/<name>.{service,timer,path,socket}` — the
@@ -90,6 +112,71 @@ fn is_systemd_enable_symlink_candidate(path: &Path) -> bool {
         return false;
     };
     matches!(ext, "service" | "timer" | "path" | "socket")
+}
+
+/// Extract the snap name from a path that follows one of the snapd-emitted
+/// shapes. Returns `None` for non-matching paths; the snap-installed check is
+/// done by the caller against the pre-scanned snap set. The 2nd dot-separated
+/// component of the filename is the snap name in both shapes (snap names are
+/// restricted to `[a-z0-9-]` by snapcraft, so a literal `.` split is safe).
+fn extract_snap_name(path: &Path) -> Option<String> {
+    let parent = path.parent()?;
+    let name = path.file_name().and_then(|n| n.to_str())?;
+
+    // systemd: /etc/systemd/{system,user}/snap.<snap>.<rest>.<ext>
+    if (parent == Path::new("/etc/systemd/system") || parent == Path::new("/etc/systemd/user"))
+        && let Some(rest) = name.strip_prefix("snap.")
+        && let Some(ext) = path.extension().and_then(|e| e.to_str())
+        && matches!(ext, "service" | "timer" | "path" | "socket")
+    {
+        return rest.split('.').next().map(str::to_string);
+    }
+
+    // udev: /etc/udev/rules.d/70-snap.<snap>.rules
+    if parent == Path::new("/etc/udev/rules.d")
+        && let Some(stem) = name
+            .strip_prefix("70-snap.")
+            .and_then(|s| s.strip_suffix(".rules"))
+    {
+        return Some(stem.to_string());
+    }
+
+    None
+}
+
+/// Enumerate installed snap names by probing both standard locations: the
+/// `/snap/<name>/` directory layout (one subdir per snap, plus a `bin/`
+/// shim dir that's not a snap) and the `/var/lib/snapd/snaps/<name>_<rev>.snap`
+/// blob layout. Returns `None` if neither location yields any snaps — that
+/// host doesn't run snapd and the attribution pass is a no-op.
+fn build_snap_set() -> Option<HashSet<String>> {
+    let mut set: HashSet<String> = HashSet::new();
+    if let Ok(entries) = fs::read_dir("/snap") {
+        for entry in entries.flatten() {
+            let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+                continue;
+            };
+            if name == "bin" || name.starts_with('.') {
+                continue;
+            }
+            if entry.metadata().is_ok_and(|m| m.is_dir()) {
+                set.insert(name);
+            }
+        }
+    }
+    if let Ok(entries) = fs::read_dir("/var/lib/snapd/snaps") {
+        for entry in entries.flatten() {
+            let Some(fname) = entry.file_name().to_str().map(str::to_string) else {
+                continue;
+            };
+            if let Some(stem) = fname.strip_suffix(".snap")
+                && let Some((name, _rev)) = stem.split_once('_')
+            {
+                set.insert(name.to_string());
+            }
+        }
+    }
+    if set.is_empty() { None } else { Some(set) }
 }
 
 fn detect() -> PackageManager {
@@ -421,6 +508,67 @@ usr/share/man/man1/bluetoothctl.1.gz
     fn pacman_files_parser_empty_when_no_files_section() {
         let content = "%NAME%\nfoo\n\n%VERSION%\n1.0-1\n";
         assert!(parse_pacman_files_content(content).is_empty());
+    }
+
+    #[test]
+    fn extracts_snap_name_from_systemd_unit_paths() {
+        // 2nd dot-separated component is the snap; rest is app + ext.
+        assert_eq!(
+            extract_snap_name(Path::new("/etc/systemd/system/snap.cups.cupsd.service")),
+            Some("cups".to_string())
+        );
+        assert_eq!(
+            extract_snap_name(Path::new(
+                "/etc/systemd/system/snap.mesa-2404.component-monitor.service"
+            )),
+            Some("mesa-2404".to_string())
+        );
+        // user-global scope is also valid for snap units.
+        assert_eq!(
+            extract_snap_name(Path::new(
+                "/etc/systemd/user/snap.firmware-updater.firmware-notifier.timer"
+            )),
+            Some("firmware-updater".to_string())
+        );
+        // Hyphenated snap name with multi-dot app slug.
+        assert_eq!(
+            extract_snap_name(Path::new(
+                "/etc/systemd/user/snap.snapd-desktop-integration.snapd-desktop-integration.service"
+            )),
+            Some("snapd-desktop-integration".to_string())
+        );
+    }
+
+    #[test]
+    fn extracts_snap_name_from_udev_rule_paths() {
+        // 70-snap.<name>.rules — name is the slug between the prefix and .rules.
+        assert_eq!(
+            extract_snap_name(Path::new("/etc/udev/rules.d/70-snap.chromium.rules")),
+            Some("chromium".to_string())
+        );
+        assert_eq!(
+            extract_snap_name(Path::new("/etc/udev/rules.d/70-snap.snap-store.rules")),
+            Some("snap-store".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_snap_name_rejects_non_snap_paths() {
+        // Right shape but wrong directory — a snap.foo.service under
+        // /usr/lib/systemd/system/ would already be package-attributed by
+        // the file index, and we don't want to second-guess.
+        assert!(
+            extract_snap_name(Path::new("/usr/lib/systemd/system/snap.cups.cupsd.service"))
+                .is_none()
+        );
+        // Right dir, wrong filename prefix.
+        assert!(extract_snap_name(Path::new("/etc/systemd/system/sshd.service")).is_none());
+        // Unit-type extensions we don't survey.
+        assert!(extract_snap_name(Path::new("/etc/systemd/system/snap.cups.target")).is_none());
+        // udev: wrong prefix.
+        assert!(extract_snap_name(Path::new("/etc/udev/rules.d/99-foo.rules")).is_none());
+        // udev: right prefix, wrong extension.
+        assert!(extract_snap_name(Path::new("/etc/udev/rules.d/70-snap.cups.conf")).is_none());
     }
 
     #[test]
