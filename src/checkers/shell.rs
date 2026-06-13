@@ -121,7 +121,7 @@ fn check_file(path: &Path, shell: &str, when: &str, scope: Scope) -> Option<Find
         );
     }
     Some(Finding {
-        category: "shell",
+        category: "shell".to_string(),
         mechanism: when.to_string(),
         source: path.to_path_buf(),
         target: None,

@@ -80,7 +80,7 @@ fn parse_module_list(content: &str, source: &Path, mechanism: &str) -> Vec<Findi
         .map(strip_comment)
         .filter(|l| !l.is_empty())
         .map(|module| Finding {
-            category: "modules",
+            category: "modules".to_string(),
             mechanism: mechanism.to_string(),
             source: source.to_path_buf(),
             target: Some(module.to_string()),
@@ -134,7 +134,7 @@ fn parse_install_directive(line: &str, source: &Path) -> Option<Finding> {
     metadata.insert("directive".to_string(), "install".to_string());
 
     Some(Finding {
-        category: "modules",
+        category: "modules".to_string(),
         mechanism: format!(
             "modprobe `install {module}` — runs command instead of loading the module"
         ),

@@ -39,7 +39,7 @@ fn check_preload_file() -> Vec<Finding> {
         .map(str::trim)
         .filter(|l| !l.is_empty() && !l.starts_with('#'))
         .map(|line| Finding {
-            category: "ld_so",
+            category: "ld_so".to_string(),
             mechanism: "ld.so preload (loaded into every dynamically-linked process)".into(),
             source: path.to_path_buf(),
             target: Some(line.to_string()),
@@ -62,7 +62,7 @@ fn check_environment_file() -> Vec<Finding> {
         .map(|value| {
             let value = value.trim_matches(|c| c == '"' || c == '\'');
             Finding {
-                category: "ld_so",
+                category: "ld_so".to_string(),
                 mechanism: "LD_PRELOAD set in /etc/environment".into(),
                 source: path.to_path_buf(),
                 target: Some(value.to_string()),
@@ -124,7 +124,7 @@ fn parse_conf_line(line: &str, source: &Path, lineno: usize) -> Vec<Finding> {
             let mut metadata = BTreeMap::new();
             metadata.insert("line".to_string(), (lineno + 1).to_string());
             Finding {
-                category: "ld_so",
+                category: "ld_so".to_string(),
                 mechanism: mechanism.to_string(),
                 source: source.to_path_buf(),
                 target: Some(target),

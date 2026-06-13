@@ -142,7 +142,7 @@ fn scan_system_crontab(path: &Path) -> Vec<Finding> {
         };
         let metadata = metadata_for(&parsed.schedule, parsed.user.as_deref(), lineno);
         findings.push(Finding {
-            category: "cron",
+            category: "cron".to_string(),
             mechanism: mechanism_for(&parsed.schedule, "cron "),
             source: path.to_path_buf(),
             target: Some(parsed.command),
@@ -184,7 +184,7 @@ fn scan_interval_dir(interval: &str) -> Vec<Finding> {
         metadata.insert("size_bytes".to_string(), meta.len().to_string());
 
         findings.push(Finding {
-            category: "cron",
+            category: "cron".to_string(),
             mechanism: format!("/etc/cron.{interval}/ — runs once {interval} via run-parts"),
             source: path,
             target: None,
@@ -236,7 +236,7 @@ fn scan_anacrontab() -> Vec<Finding> {
         };
 
         findings.push(Finding {
-            category: "cron",
+            category: "cron".to_string(),
             mechanism: mech,
             source: path.to_path_buf(),
             target: Some(command),
@@ -285,7 +285,7 @@ fn scan_user_spool(spool: &Path) -> Vec<Finding> {
             };
             let metadata = metadata_for(&parsed.schedule, None, lineno);
             findings.push(Finding {
-                category: "cron",
+                category: "cron".to_string(),
                 mechanism: mechanism_for(&parsed.schedule, "user crontab — "),
                 source: path.clone(),
                 target: Some(parsed.command),
@@ -325,7 +325,7 @@ fn scan_at_jobs() -> Vec<Finding> {
         let mut metadata = BTreeMap::new();
         metadata.insert("size_bytes".to_string(), meta.len().to_string());
         findings.push(Finding {
-            category: "cron",
+            category: "cron".to_string(),
             mechanism: "at job (one-shot scheduled command)".to_string(),
             source: path,
             target: None,

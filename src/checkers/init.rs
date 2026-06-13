@@ -65,7 +65,7 @@ fn scan_initd() -> Vec<Finding> {
         }
 
         findings.push(Finding {
-            category: "init",
+            category: "init".to_string(),
             mechanism: "SysV init script".to_string(),
             source: path,
             target: None,
@@ -135,7 +135,7 @@ fn scan_rc_local() -> Option<Finding> {
     }
 
     Some(Finding {
-        category: "init",
+        category: "init".to_string(),
         mechanism: "/etc/rc.local — runs on boot if executable".to_string(),
         source: path.to_path_buf(),
         target: None,
@@ -174,7 +174,7 @@ fn scan_inittab() -> Vec<Finding> {
         metadata.insert("line".to_string(), (lineno + 1).to_string());
 
         findings.push(Finding {
-            category: "init",
+            category: "init".to_string(),
             mechanism: format!("inittab `{}`", parts[2]),
             source: path.to_path_buf(),
             target: Some(process.to_string()),

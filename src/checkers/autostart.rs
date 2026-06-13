@@ -150,7 +150,7 @@ fn build_finding(content: &str, source: &Path, scope: &Scope) -> Option<Finding>
     }
 
     Some(Finding {
-        category: "autostart",
+        category: "autostart".to_string(),
         mechanism: "XDG autostart .desktop entry".to_string(),
         source: source.to_path_buf(),
         target: Some(exec),

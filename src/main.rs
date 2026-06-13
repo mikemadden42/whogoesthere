@@ -1,8 +1,11 @@
 mod checker;
 mod checkers;
+mod diff;
 mod finding;
 mod package_ownership;
 mod util;
+
+use std::path::PathBuf;
 
 use clap::{Parser, ValueEnum};
 
@@ -26,6 +29,12 @@ struct Cli {
     /// List the available checker names and exit. Use with --checker.
     #[arg(long)]
     list_checkers: bool,
+
+    /// Compare two snapshot JSON files (produced by `--format json`) and
+    /// print findings that appeared or disappeared between them. Skips the
+    /// scan entirely.
+    #[arg(long, value_names = ["OLD", "NEW"], num_args = 2)]
+    diff: Option<Vec<PathBuf>>,
 }
 
 #[derive(Clone, ValueEnum)]
@@ -36,6 +45,18 @@ enum OutputFormat {
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+
+    if let Some(paths) = &cli.diff {
+        // `num_args = 2` guarantees exactly two paths.
+        let old: Vec<Finding> = serde_json::from_reader(std::fs::File::open(&paths[0])?)?;
+        let new: Vec<Finding> = serde_json::from_reader(std::fs::File::open(&paths[1])?)?;
+        let diff = diff::diff_snapshots(old, new);
+        match cli.format {
+            OutputFormat::Text => print_diff(&diff),
+            OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&diff)?),
+        }
+        return Ok(());
+    }
 
     let checkers: Vec<Box<dyn Checker>> = vec![
         Box::new(checkers::systemd::SystemdChecker),
@@ -134,23 +155,40 @@ fn print_text(findings: &[Finding]) {
         return;
     }
     for f in findings {
-        println!("[{}] {}", f.category, f.mechanism);
-        println!("  source:  {}", f.source.display());
-        if let Some(t) = &f.target {
-            println!("  target:  {t}");
-        }
-        match &f.scope {
-            Scope::System => println!("  scope:   system"),
-            Scope::User { uid, name } => println!("  scope:   user {name} (uid {uid})"),
-        }
-        match &f.package {
-            PackageOrigin::Owned { package } => println!("  package: {package}"),
-            PackageOrigin::Untracked => println!("  package: UNTRACKED"),
-            PackageOrigin::Unknown => println!("  package: unknown"),
-        }
-        for (k, v) in &f.metadata {
-            println!("  {k}: {v}");
-        }
-        println!();
+        print_finding(f, "");
     }
+}
+
+fn print_diff(diff: &diff::Diff) {
+    if diff.added.is_empty() && diff.removed.is_empty() {
+        println!("no changes");
+        return;
+    }
+    for f in &diff.added {
+        print_finding(f, "+ ");
+    }
+    for f in &diff.removed {
+        print_finding(f, "- ");
+    }
+}
+
+fn print_finding(f: &Finding, prefix: &str) {
+    println!("{prefix}[{}] {}", f.category, f.mechanism);
+    println!("{prefix}  source:  {}", f.source.display());
+    if let Some(t) = &f.target {
+        println!("{prefix}  target:  {t}");
+    }
+    match &f.scope {
+        Scope::System => println!("{prefix}  scope:   system"),
+        Scope::User { uid, name } => println!("{prefix}  scope:   user {name} (uid {uid})"),
+    }
+    match &f.package {
+        PackageOrigin::Owned { package } => println!("{prefix}  package: {package}"),
+        PackageOrigin::Untracked => println!("{prefix}  package: UNTRACKED"),
+        PackageOrigin::Unknown => println!("{prefix}  package: unknown"),
+    }
+    for (k, v) in &f.metadata {
+        println!("{prefix}  {k}: {v}");
+    }
+    println!();
 }

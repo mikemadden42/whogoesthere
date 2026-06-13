@@ -70,7 +70,7 @@ fn scan_rules_file(content: &str, source: &Path) -> Vec<Finding> {
             metadata.insert("directive".to_string(), directive.to_string());
             metadata.insert("line".to_string(), (lineno + 1).to_string());
             findings.push(Finding {
-                category: "udev",
+                category: "udev".to_string(),
                 mechanism: format!("udev rule {directive} — runs command on matching device event"),
                 source: source.to_path_buf(),
                 target: Some(value),

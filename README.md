@@ -42,7 +42,38 @@ cargo run --release -- --checker systemd --checker cron
 
 # Only entries no package owns — the malware-triage signal
 cargo run --release -- --untracked-only
+
+# Diff two snapshots — surface persistence vectors that appeared or
+# disappeared between runs. The actually-useful operational workflow.
+cargo run --release -- --format json > today.json
+# ... time passes, system gets rerun ...
+cargo run --release -- --diff yesterday.json today.json
 ```
+
+## Baseline + diff workflow
+
+The `UNTRACKED` filter answers "what's not in any package?" The `--diff` mode
+answers the more important question: **what changed since last time?**
+
+```sh
+# Snapshot the host
+whogoesthere --format json > /var/lib/whogoesthere/baseline.json
+
+# Later — after package updates, after suspected compromise, on a schedule:
+whogoesthere --format json > /tmp/current.json
+whogoesthere --diff /var/lib/whogoesthere/baseline.json /tmp/current.json
+```
+
+Findings present only in the new snapshot are emitted with `+`; findings
+present only in the old snapshot with `-`. JSON output (`--format json`)
+emits `{"added": [...], "removed": [...]}`.
+
+Diff identity matches on the persistence vector — `category`, `source`,
+`target`, `mechanism`, `scope` — and deliberately ignores `package` status
+and `metadata`. So a `pam` rule that gets renumbered when a line is
+inserted above it won't appear in the diff; only the actually-new rule
+will. Similarly, a finding flipping from `UNTRACKED` to `Owned` (because
+the host installed the package between runs) is not a diff event.
 
 ## Reading the output
 

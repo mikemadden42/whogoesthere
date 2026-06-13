@@ -71,7 +71,7 @@ fn scan_pam_file(content: &str, source: &Path) -> Vec<Finding> {
             metadata.insert("module_args".to_string(), rule.args.to_string());
         }
         findings.push(Finding {
-            category: "pam",
+            category: "pam".to_string(),
             mechanism: format!(
                 "PAM rule ({service}/{}) — runs at authentication time",
                 rule.kind

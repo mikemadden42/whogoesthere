@@ -337,9 +337,23 @@ ROI for adding more:
       netplan` is owned by `netplan.io`. Not worth designing for until
       more similar cases appear; revisit if the pattern shows up on
       additional captures.
-- [ ] Baseline + diff mode. `--baseline` writes a snapshot; `--diff old.json
-      new.json` shows additions/removals. The diff is the actually-useful
-      detection signal in practice.
+- [x] Baseline + diff mode. *Done — `--diff OLD NEW`.* The existing
+      `--format json > snapshot.json` is the snapshot path (no separate
+      `--baseline` flag needed). New `diff` module computes
+      additions/removals between two snapshots and emits them with `+`/
+      `-` prefixes in text mode or `{"added": [...], "removed": [...]}`
+      in JSON mode. Identity matches on the persistence vector
+      (`category`, `source`, `target`, `mechanism`, `scope`) and
+      deliberately excludes `package` status and `metadata` — so a PAM
+      rule that gets renumbered after a line is inserted above it
+      doesn't appear as added/removed, and an `UNTRACKED → Owned` flip
+      from a package install isn't a diff event either. Prerequisite
+      changes: `Finding` and friends gained `Deserialize`;
+      `category: &'static str` → `category: String` to make the type
+      round-trip through JSON. 6 unit tests cover identical snapshots,
+      pure-add, pure-remove, metadata-only-delta (no diff), package-
+      status-only-delta (no diff), and per-user-scope separation. README
+      updated with the workflow.
 
 ## Additional persistence vectors (v2 candidates)
 

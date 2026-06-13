@@ -84,7 +84,7 @@ fn scan_sshd_config(path: &Path) -> Vec<Finding> {
         );
         metadata.insert("size_bytes".to_string(), meta.len().to_string());
         return vec![Finding {
-            category: "ssh",
+            category: "ssh".to_string(),
             mechanism: "sshd_config (unreadable — likely 0600 root)".to_string(),
             source: path.to_path_buf(),
             target: None,
@@ -115,7 +115,7 @@ fn scan_sshd_config(path: &Path) -> Vec<Finding> {
                 metadata.insert("match_block".to_string(), m.clone());
             }
             findings.push(Finding {
-                category: "ssh",
+                category: "ssh".to_string(),
                 mechanism: format!("sshd_config {directive}= — runs on every SSH login"),
                 source: path.to_path_buf(),
                 target: Some(value.to_string()),
@@ -161,7 +161,7 @@ fn scan_authorized_keys(path: &Path, scope: &Scope) -> Vec<Finding> {
         );
         metadata.insert("size_bytes".to_string(), meta.len().to_string());
         return vec![Finding {
-            category: "ssh",
+            category: "ssh".to_string(),
             mechanism: "authorized_keys (unreadable to current user)".to_string(),
             source: path.to_path_buf(),
             target: None,
@@ -185,7 +185,7 @@ fn scan_authorized_keys(path: &Path, scope: &Scope) -> Vec<Finding> {
             }
         }
         findings.push(Finding {
-            category: "ssh",
+            category: "ssh".to_string(),
             mechanism: "authorized_keys entry — grants passwordless SSH login".to_string(),
             source: path.to_path_buf(),
             target: key.comment,
@@ -219,7 +219,7 @@ fn scan_login_script(path: &Path, scope: &Scope, location: &str) -> Vec<Finding>
         "~/.ssh/rc — runs on every SSH login as this user"
     };
     vec![Finding {
-        category: "ssh",
+        category: "ssh".to_string(),
         mechanism: mech.to_string(),
         source: path.to_path_buf(),
         target: None,

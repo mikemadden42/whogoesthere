@@ -246,7 +246,7 @@ fn emit_service(unit: &Unit, source: &Path, scope: &Scope, location: &str) -> Ve
                 metadata.insert("run_as".to_string(), u.clone());
             }
             findings.push(Finding {
-                category: "systemd",
+                category: "systemd".to_string(),
                 mechanism: format!("systemd service {key}= ({location})"),
                 source: source.to_path_buf(),
                 target: Some(value.to_string()),
@@ -283,7 +283,7 @@ fn emit_timer(unit: &Unit, source: &Path, scope: &Scope, location: &str) -> Vec<
         metadata.insert("activates".to_string(), a);
     }
     vec![Finding {
-        category: "systemd",
+        category: "systemd".to_string(),
         mechanism: format!("systemd timer ({location})"),
         source: source.to_path_buf(),
         target: Some(bits.join("; ")),
@@ -313,7 +313,7 @@ fn emit_path(unit: &Unit, source: &Path, scope: &Scope, location: &str) -> Vec<F
         metadata.insert("activates".to_string(), a);
     }
     vec![Finding {
-        category: "systemd",
+        category: "systemd".to_string(),
         mechanism: format!("systemd path watcher ({location})"),
         source: source.to_path_buf(),
         target: Some(bits.join("; ")),
@@ -346,7 +346,7 @@ fn emit_socket(unit: &Unit, source: &Path, scope: &Scope, location: &str) -> Vec
         metadata.insert("activates".to_string(), a);
     }
     vec![Finding {
-        category: "systemd",
+        category: "systemd".to_string(),
         mechanism: format!("systemd socket activation ({location})"),
         source: source.to_path_buf(),
         target: Some(bits.join("; ")),
