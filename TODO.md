@@ -75,14 +75,31 @@
       daemons don't typically host persistence in their `$HOME`), and
       the accepted trade-off (a service account at UID 500 with a real
       login shell wouldn't be surveyed). No behavior change.
-- [ ] **`SystemdChecker` reports `Scope::System` for the `user-global` unit
-      dirs** (`/etc/systemd/user`, `/usr/lib/systemd/user`, etc. — see
-      `src/checkers/systemd.rs:50`). These units don't actually run as root,
-      they're user-scope unit definitions shipped system-wide. The `location:
-      user-global` metadata disambiguates, but the typed `Scope` is misleading
-      for any downstream that consumes scope structurally. Consider a
-      `Scope::UserGlobal` variant if/when a baseline+diff or filter UI needs
-      to distinguish.
+- [x] **`SystemdChecker` reports `Scope::System` for the `user-global` unit
+      dirs** (`/etc/systemd/user`, `/usr/lib/systemd/user`, etc.). *Done.*
+      Added `Scope::UserGlobal` variant to the `Scope` enum
+      (`finding.rs`), serializing as `{"kind": "user_global"}`. The
+      `SystemdChecker` now emits this variant for the three global-user
+      unit dirs instead of `Scope::System`. The text renderer
+      (`main.rs::print_finding`) and the diff identity function
+      (`diff.rs::diff_key`) both gained handling for the new variant —
+      a UserGlobal finding is now distinguishable from a System finding
+      with the same source path. 2 unit tests added: serde round-trip
+      via JSON (so snapshots from `--format json` deserialize cleanly
+      via `--diff`), and diff identity confirming a unit that crosses
+      between System and UserGlobal scope on the same source path shows
+      up as removed+added (a *real* semantic change worth surfacing,
+      not a metadata-only delta).
+      Live Fedora measurement: 152 findings now carry `scope: user_global`
+      that previously carried `scope: system` (these were always
+      user-global semantically — they live in `/etc/systemd/user/`,
+      `/usr/lib/systemd/user/`, etc. — the typed scope just now matches).
+      **One-time upgrade impact:** any pre-existing baseline JSON has
+      these findings as `scope: system`; the first `--diff` against an
+      old baseline will show all 152 as removed-from-System +
+      added-as-UserGlobal even though no real persistence change
+      occurred. Regenerate the baseline after upgrading. Total findings,
+      UNTRACKED counts, and attribution all unchanged.
 - [x] **`cron::scan_user_spool` falls back to uid 0 for unknown usernames**
       (`src/checkers/cron.rs:276`). *Done.* The lookup now returns
       `(uid, orphan: bool)` instead of silently using uid 0. When the
@@ -153,12 +170,17 @@
       `/var/spool/cron/crontabs` via `USER_SPOOLS`, and the capture
       shows expected per-user crontab findings emerging from the
       Debian-style layout with no parsing errors.
-- [ ] Smoke-test the dpkg branch of the package-ownership cache on a real
-      Debian/Ubuntu box. Coded against the standard `/var/lib/dpkg/info/*.list`
-      layout (one absolute path per line, `:arch` stripped from filename to
-      match `dpkg -S`) but never exercised on real data. Check: total finding
-      count, UNTRACKED count looks sane, dpkg-diverted paths aren't producing
-      noisy false-UNTRACKEDs.
+- [x] Smoke-test the dpkg branch of the package-ownership cache on a real
+      Debian/Ubuntu box. *Validated.* The Ubuntu 24.04 arm64 capture has
+      driven the entire session's noise-reduction work. Total/UNTRACKED
+      counts are sane (1696 / 8 after all noise-collapse landed); the
+      merged-`/usr` rewrite was specifically validated (1019 → 73
+      UNTRACKED drop measured), and the postinst allowlist's entries
+      (`/etc/profile`, `/etc/pam.d/common-*`, `/etc/modules`) were all
+      diagnosed from this dpkg data. The 8 remaining UNTRACKED are the
+      irreducible set (user dotfiles + ssh keys + admin-installed
+      custom unit + the netplan runtime case). dpkg-diverted paths
+      didn't appear as a noise class on this host.
 - [ ] Smoke-test the pacman branch of the package-ownership cache on a real
       Arch box. Same caveat as dpkg — code is written against documented
       `/var/lib/pacman/local/*/files` layout but unverified. Check that

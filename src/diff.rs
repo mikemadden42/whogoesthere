@@ -44,6 +44,7 @@ pub fn diff_snapshots(old: Vec<Finding>, new: Vec<Finding>) -> Diff {
 fn diff_key(f: &Finding) -> String {
     let scope = match &f.scope {
         Scope::System => "system".to_string(),
+        Scope::UserGlobal => "user-global".to_string(),
         Scope::User { uid, name } => format!("user:{uid}:{name}"),
     };
     format!(
@@ -201,6 +202,51 @@ mod tests {
         let diff = diff_snapshots(vec![old_f], vec![new_f]);
         assert!(diff.added.is_empty());
         assert!(diff.removed.is_empty());
+    }
+
+    #[test]
+    fn user_global_scope_round_trips_through_serde() {
+        // Snapshots go to disk as JSON and come back via --diff; the new
+        // variant has to serialize/deserialize cleanly or diff would
+        // crash on its own snapshots.
+        let mut f = finding(
+            "systemd",
+            "/etc/systemd/user/foo.service",
+            Some("/usr/bin/foo"),
+            "service",
+        );
+        f.scope = Scope::UserGlobal;
+        let json = serde_json::to_string(&f).expect("serializes");
+        assert!(json.contains(r#""kind":"user_global""#), "{json}");
+        let back: Finding = serde_json::from_str(&json).expect("round-trips");
+        assert!(matches!(back.scope, Scope::UserGlobal));
+    }
+
+    #[test]
+    fn user_global_scope_is_distinct_from_system_in_diff_identity() {
+        // A unit that gets moved between the system dirs (/etc/systemd/system)
+        // and the user-global dirs (/etc/systemd/user) is meaningfully
+        // different — same source path, different reach. The diff key must
+        // separate them so a snapshot transition doesn't collapse them.
+        let mut sys_f = finding(
+            "systemd",
+            "/etc/systemd/foo.service",
+            Some("/usr/bin/foo"),
+            "service",
+        );
+        sys_f.scope = Scope::System;
+        let mut ug_f = finding(
+            "systemd",
+            "/etc/systemd/foo.service",
+            Some("/usr/bin/foo"),
+            "service",
+        );
+        ug_f.scope = Scope::UserGlobal;
+        let diff = diff_snapshots(vec![sys_f], vec![ug_f]);
+        // Should appear as removed-from-System + added-as-UserGlobal,
+        // because the diff key for those two differs.
+        assert_eq!(diff.removed.len(), 1);
+        assert_eq!(diff.added.len(), 1);
     }
 
     #[test]

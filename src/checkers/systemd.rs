@@ -48,7 +48,7 @@ impl Checker for SystemdChecker {
             findings.extend(scan_unit_dir(
                 &dir,
                 &mut system_seen,
-                &Scope::System,
+                &Scope::UserGlobal,
                 "user-global",
             ));
         }

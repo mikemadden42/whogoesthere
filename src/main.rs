@@ -184,6 +184,7 @@ fn print_finding(f: &Finding, prefix: &str) {
     }
     match &f.scope {
         Scope::System => println!("{prefix}  scope:   system"),
+        Scope::UserGlobal => println!("{prefix}  scope:   user-global"),
         Scope::User { uid, name } => println!("{prefix}  scope:   user {name} (uid {uid})"),
     }
     match &f.package {
