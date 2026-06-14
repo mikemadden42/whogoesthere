@@ -211,8 +211,13 @@
       `installer: snapd` metadata. Live Ubuntu 24.04 result: 27 of
       27 snap-emitted entries reattributed cleanly, zero UNTRACKED
       remaining in the snap noise class.
-- [ ] Run against Alpine (OpenRC, no systemd). Most checkers should
-      gracefully no-op; verify nothing panics.
+- [x] Run against Alpine (OpenRC, no systemd). Most checkers should
+      gracefully no-op; verify nothing panics. *Validated on a stock
+      Alpine OpenRC install.* 73 findings across 4 checkers (init,
+      cron, shell, modules); systemd, pam, udev, dbus, autostart all
+      gracefully no-op. SysV checker dominates (63 findings — `/etc/
+      init.d/*` scripts + inittab respawn/sysinit/wait/shutdown/
+      ctrlaltdel directives all surface cleanly).
 
 ## Package-manager backends (beyond rpm/dpkg)
 
@@ -232,7 +237,7 @@ ROI for adding more:
       to pacman-owned aliases, and that no false attributions slip in.
 
 ### Worth considering (containers/cloud)
-- [x] **Alpine (apk).** *Code-complete, unverified on real Alpine.* New
+- [x] **Alpine (apk).** *Validated on a stock Alpine install.* New
       `PackageManager::Apk` variant in `detect_all()` probes via
       `which("apk")`; `build_apk_index()` reads `/lib/apk/db/installed`
       and the new `parse_apk_db_content` walks the file with a small
@@ -246,11 +251,13 @@ ROI for adding more:
       matches what `apk info --who-owns` reports. 5 unit tests: basic
       per-`R:` emission with mid-stanza `F:` change, blank-line stanza
       separator, unknown-tag passthrough + orphan-`R:` rejection,
-      empty-`F:` for root files, empty-input. Same caveat as the pacman
-      branch: needs the same smoke-test treatment on a real Alpine box
-      to confirm `which("apk")` detection and the path forms reported
-      match the actual `apk info --who-owns` output. Pairs with the
-      "Run against Alpine" TODO under Distro coverage.
+      empty-`F:` for root files, empty-input. Real-data validation
+      confirms apk attribution works on stock Alpine: 67/73 owned, 0
+      unknown, pkgids include `-rN` revision suffix and `_pN` patch
+      markers (e.g. `openssh-server-common-openrc-10.3_p1-r0`). The
+      structural gap covered by the post-install allowlist (apk's
+      `.post-install` is the analog of dpkg postinst) handles the
+      stock Alpine baseline crontab cleanly.
 
 ### Awkward fit — likely skip or detect-and-bail
 - [ ] **NixOS**. Fundamentally different model: everything in `/nix/store`

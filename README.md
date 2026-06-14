@@ -179,12 +179,16 @@ Validated on:
   correctly (epoch-prefixed versions, e.g. `avahi-1:0.9rc4-1`, included).
   UNTRACKED set is the same shape: per-user dotfiles, autostart entries,
   and a custom `~/.xinitrc`, plus a distro-customized `/etc/pam.d/polkit-1`.
+- **Alpine (apk, OpenRC)** — 73 findings, 1 UNTRACKED (`/root/.profile`,
+  the lone triage target) after the busybox-openrc post-install allowlist
+  reattributes the 5 baseline root-crontab entries. Confirms the apk
+  backend handles `-rN` revision suffixes and `_pN` patch markers
+  (`openssh-server-common-openrc-10.3_p1-r0`), and that the systemd /
+  PAM / udev / dbus / autostart checkers gracefully no-op when their
+  substrates aren't present.
 
 All on irreducible noise floors — every remaining UNTRACKED is a real
 triage target, not a false positive.
-
-Smoke-test pending on Alpine (apk); the backend is written against the
-documented `/lib/apk/db/installed` layout but unverified on real data.
 
 ## Why the name?
 
