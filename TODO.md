@@ -218,11 +218,27 @@
       gracefully no-op. SysV checker dominates (63 findings — `/etc/
       init.d/*` scripts + inittab respawn/sysinit/wait/shutdown/
       ctrlaltdel directives all surface cleanly).
-- [ ] Run on Debian stable (12 or 13). Re-exercises dpkg but on a
+- [x] Run on Debian stable (12 or 13). Re-exercises dpkg but on a
       server-shaped install: older systemd than Ubuntu 24.04, no snap,
       sysvinit fragments still present in places, different postinst
       conventions than Ubuntu's `pam-auth-update` lineage. Likely host
       shape for anyone running this on a Debian server.
+      *Validated on a Debian 13 GNOME install.* 4 UNTRACKED (user
+      dotfiles only — cleanest set of all six captures). dpkg
+      backend emits the bare package name (no version/arch suffix),
+      consistent with Ubuntu. The postinst allowlist continues to
+      cover `/etc/profile` → `base-files` and 5 `/etc/pam.d/common-*`
+      → `libpam-runtime`; no new postinst-class UNTRACKED appeared.
+      Validates the snapd backend correctly stays inert (no snap on
+      Debian), 24 SysV init scripts surface with runlevel cross-ref,
+      `ifupdown`'s `networking.service` parses, and the apt_hooks
+      checker handles all 5 hooks across `70debconf`, `20packagekit`
+      (multi-line gdbus invocation), `20listchanges`, `50appstream`.
+      Also surfaced a udev parser bug: `61-gdm.rules` uses `\"` to
+      embed quotes inside a multi-line `IMPORT{program}=` shell
+      command; the value extractor truncated at the first escaped
+      quote. Fixed in the same session by skipping `\"` in the
+      closing-quote scan.
 - [x] Run on a RHEL-family server (Rocky/Alma/CentOS Stream 9 or 10).
       Re-exercises rpm but in the production server profile that Fedora
       desktop doesn't cover: SELinux active, no GNOME, sssd PAM stack,

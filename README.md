@@ -193,6 +193,14 @@ Validated on:
   PAM control, Cockpit, podman, and dnf-system-upgrade all parse and
   attribute correctly. `sshd_config` 0600 perms gracefully degrade
   (the entry surfaces with `unreadable` metadata, "rerun as root").
+- **Debian 13 (GNOME)** — 4 UNTRACKED (user dotfiles only, cleanest
+  set of all six captures). Re-exercises dpkg on a non-Ubuntu profile:
+  no snap, 24 SysV init scripts coexisting with their systemd unit
+  counterparts, `ifupdown`-style `networking.service` instead of
+  netplan. apt_hooks checker handles 5 hooks including the multi-line
+  `20packagekit` gdbus invocation. Capture also surfaced a latent
+  udev parser bug (escaped quotes inside `IMPORT{program}=` shell
+  commands) that's been fixed.
 
 All on irreducible noise floors — every remaining UNTRACKED is a real
 triage target, not a false positive.
