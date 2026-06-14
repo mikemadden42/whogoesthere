@@ -120,12 +120,29 @@ fn extract_with_prefixes(
             continue;
         }
         let val_start = after + 1;
-        let Some(close_offset) = line[val_start..].find('"') else {
-            return;
+        // Find the closing `"`, skipping `\"` (escaped quote). udev rules
+        // use this escape to embed double quotes inside a quoted value —
+        // e.g. gdm3's 61-gdm.rules wraps a multi-line shell command that
+        // emits `echo \"KEY=value\"`. Without the skip, the parser stops
+        // at the first escaped quote and truncates the captured target.
+        let bytes = line.as_bytes();
+        let mut scan = val_start;
+        let close_idx = loop {
+            if scan >= bytes.len() {
+                return;
+            }
+            if bytes[scan] == b'\\' && scan + 1 < bytes.len() && bytes[scan + 1] == b'"' {
+                scan += 2;
+                continue;
+            }
+            if bytes[scan] == b'"' {
+                break scan;
+            }
+            scan += 1;
         };
-        let value = &line[val_start..val_start + close_offset];
+        let value = &line[val_start..close_idx];
         out.push((canonical, value.to_string()));
-        pos = val_start + close_offset + 1;
+        pos = close_idx + 1;
     }
 }
 
@@ -196,6 +213,24 @@ mod tests {
         // first extract still lands.
         let r = extract_run(r#"RUN+="/usr/bin/foo", RUN+="unterminated"#);
         assert_eq!(r, vec![("RUN", "/usr/bin/foo".to_string())]);
+    }
+
+    #[test]
+    fn escaped_double_quote_inside_value_does_not_truncate() {
+        // gdm3's 61-gdm.rules (Debian 13) uses backslash-escaped quotes
+        // inside a multi-line IMPORT{program} shell command. Without the
+        // escape-aware closing-quote scan, the captured target stopped at
+        // the first `\"` and was truncated to `/bin/sh -c \`.
+        let line = r#"IMPORT{program}="/bin/sh -c 'echo \"FOO=$value\"'""#;
+        let mut out = Vec::new();
+        extract_with_prefixes(line, IMPORT_PROGRAM_PREFIXES, "IMPORT{program}", &mut out);
+        assert_eq!(
+            out,
+            vec![(
+                "IMPORT{program}",
+                r#"/bin/sh -c 'echo \"FOO=$value\"'"#.to_string()
+            )]
+        );
     }
 
     #[test]
