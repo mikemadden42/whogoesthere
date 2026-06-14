@@ -181,11 +181,21 @@
       irreducible set (user dotfiles + ssh keys + admin-installed
       custom unit + the netplan runtime case). dpkg-diverted paths
       didn't appear as a noise class on this host.
-- [ ] Smoke-test the pacman branch of the package-ownership cache on a real
+- [x] Smoke-test the pacman branch of the package-ownership cache on a real
       Arch box. Same caveat as dpkg — code is written against documented
       `/var/lib/pacman/local/*/files` layout but unverified. Check that
       `%FILES%`-section parsing is correct, total/UNTRACKED counts are sane,
       and that the directory-name-as-pkgid format reads cleanly in output.
+      *Validated on a Manjaro VM capture.* Pacman attribution works on
+      real data: every owned package emits the expected `<name>-<ver>-<rel>`
+      pkgid (epoch-prefixed where applicable, e.g. `avahi-1:0.9rc4-1`,
+      `pipewire-1:1.6.5-2`). `systemd-enable-symlink` reattribution carries
+      across to pacman-owned aliases. UNTRACKED set matches the shape seen
+      on Fedora/Ubuntu (per-user dotfiles + autostart entries + a custom
+      `~/.xinitrc`) plus a Manjaro-customized `/etc/pam.d/polkit-1` (10
+      lines, owned package `polkit-127-3` ships polkit upstream but
+      Manjaro's pkgbuild drops this PAM file). No false attribution; the
+      `%FILES%` section parser handles the documented layout cleanly.
 - [x] Check snap-generated systemd units on Ubuntu. They live in
       `/etc/systemd/system/` and may all show as UNTRACKED because snapd
       synthesizes them rather than dpkg-installing them.
@@ -213,12 +223,13 @@ returns `PackageManager::None` and every finding gets `PackageOrigin::Unknown`
 ROI for adding more:
 
 ### Worth adding
-- [x] **Arch (pacman).** *Code-complete, unverified on real Arch.* Pre-scan
-      walks `/var/lib/pacman/local/<pkg>-<ver>-<rel>/files`, reads the
-      `%FILES%` section (one relative path per line; leading `/` prepended),
-      and uses the directory name verbatim as the package identifier (so
-      output matches `pacman -Qo`). Needs the same smoke-test treatment as
-      the dpkg branch on a real Arch box.
+- [x] **Arch (pacman).** *Validated on a Manjaro VM.* Pre-scan walks
+      `/var/lib/pacman/local/<pkg>-<ver>-<rel>/files`, reads the `%FILES%`
+      section (one relative path per line; leading `/` prepended), and
+      uses the directory name verbatim as the package identifier (so
+      output matches `pacman -Qo`). Real-data validation confirms epoch
+      handling (e.g. `pipewire-1:1.6.5-2`), benign-symlink reattribution
+      to pacman-owned aliases, and that no false attributions slip in.
 
 ### Worth considering (containers/cloud)
 - [x] **Alpine (apk).** *Code-complete, unverified on real Alpine.* New

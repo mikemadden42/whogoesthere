@@ -175,12 +175,16 @@ Validated on:
   SSH keys + 4 user dotfiles, exactly the analyst-worthy set).
 - **Ubuntu 24.04 (arm64)** — 1696 findings, 8 UNTRACKED (irreducible: 4
   user dotfiles + 2 SSH keys + 1 custom unit + 1 netplan runtime case).
+- **Manjaro (pacman)** — pacman backend attributes every owned package
+  correctly (epoch-prefixed versions, e.g. `avahi-1:0.9rc4-1`, included).
+  UNTRACKED set is the same shape: per-user dotfiles, autostart entries,
+  and a custom `~/.xinitrc`, plus a distro-customized `/etc/pam.d/polkit-1`.
 
-Both at irreducible noise floors — every remaining UNTRACKED is a real
+All on irreducible noise floors — every remaining UNTRACKED is a real
 triage target, not a false positive.
 
-Smoke-test pending on Arch (pacman) and Alpine (apk); both backends are
-written against documented DB formats but unverified on real data.
+Smoke-test pending on Alpine (apk); the backend is written against the
+documented `/lib/apk/db/installed` layout but unverified on real data.
 
 ## Why the name?
 
