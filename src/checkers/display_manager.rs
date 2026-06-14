@@ -62,12 +62,13 @@ const SYSTEM_SCRIPTS: &[(&str, &str, &str)] = &[
 ];
 
 /// Dirs whose every executable child runs at session start. `/etc/X11/
-/// Xsession.d/` is the canonical Debian/Ubuntu sourced-fragment layout —
-/// each `*.sh` here is sourced by `/etc/X11/Xsession` in lexical order
-/// during session startup.
+/// Xsession.d/` originated as a Debian/Ubuntu sourced-fragment layout but
+/// other distros (RHEL via brltty, etc.) also populate it — each `*.sh`
+/// here is sourced by `/etc/X11/Xsession` in lexical order during session
+/// startup.
 const SYSTEM_SCRIPT_DIRS: &[(&str, &str, &str)] = &[(
     "/etc/X11/Xsession.d",
-    "Debian X session fragment — sourced by /etc/X11/Xsession",
+    "X session fragment — sourced by /etc/X11/Xsession",
     "xsession",
 )];
 
@@ -247,7 +248,7 @@ mod tests {
 
         let findings = scan_script_dir(
             &dir,
-            "Debian X session fragment — sourced by /etc/X11/Xsession",
+            "X session fragment — sourced by /etc/X11/Xsession",
             "xsession",
         );
         let _ = fs::remove_dir_all(&dir);
