@@ -218,6 +218,18 @@
       gracefully no-op. SysV checker dominates (63 findings — `/etc/
       init.d/*` scripts + inittab respawn/sysinit/wait/shutdown/
       ctrlaltdel directives all surface cleanly).
+- [ ] Run on Debian stable (12 or 13). Re-exercises dpkg but on a
+      server-shaped install: older systemd than Ubuntu 24.04, no snap,
+      sysvinit fragments still present in places, different postinst
+      conventions than Ubuntu's `pam-auth-update` lineage. Likely host
+      shape for anyone running this on a Debian server.
+- [ ] Run on a RHEL-family server (Rocky/Alma/CentOS Stream 9 or 10).
+      Re-exercises rpm but in the production server profile that Fedora
+      desktop doesn't cover: SELinux active, no GNOME, sssd PAM stack,
+      systemd often a major version behind Fedora. Likely host shape
+      for ops/security folks deploying the tool. Most-different
+      finding shape from the existing four captures — fewer
+      dbus/autostart, more PAM and selinux-touched modules.
 
 ## Package-manager backends (beyond rpm/dpkg)
 
