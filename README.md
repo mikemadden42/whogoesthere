@@ -186,6 +186,13 @@ Validated on:
   (`openssh-server-common-openrc-10.3_p1-r0`), and that the systemd /
   PAM / udev / dbus / autostart checkers gracefully no-op when their
   substrates aren't present.
+- **AlmaLinux 10.2 (rpm, RHEL-family server)** — 7 UNTRACKED, all user
+  dotfiles. rpm pkgids carry the AlmaLinux vendor markers cleanly
+  (`systemd-257-23.el10_2.2.alma.1.x86_64`). SSSD, SELinux PAM
+  (`pam_selinux_permit.so`, `pam_sepermit.so`), the RHEL `substack`
+  PAM control, Cockpit, podman, and dnf-system-upgrade all parse and
+  attribute correctly. `sshd_config` 0600 perms gracefully degrade
+  (the entry surfaces with `unreadable` metadata, "rerun as root").
 
 All on irreducible noise floors — every remaining UNTRACKED is a real
 triage target, not a false positive.

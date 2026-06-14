@@ -223,13 +223,24 @@
       sysvinit fragments still present in places, different postinst
       conventions than Ubuntu's `pam-auth-update` lineage. Likely host
       shape for anyone running this on a Debian server.
-- [ ] Run on a RHEL-family server (Rocky/Alma/CentOS Stream 9 or 10).
+- [x] Run on a RHEL-family server (Rocky/Alma/CentOS Stream 9 or 10).
       Re-exercises rpm but in the production server profile that Fedora
       desktop doesn't cover: SELinux active, no GNOME, sssd PAM stack,
       systemd often a major version behind Fedora. Likely host shape
       for ops/security folks deploying the tool. Most-different
       finding shape from the existing four captures — fewer
       dbus/autostart, more PAM and selinux-touched modules.
+      *Validated on an AlmaLinux 10.2 VM.* 7 UNTRACKED (all user
+      dotfiles, irreducible). rpm pkgids carry the `.elN_N.alma.N`
+      vendor markers cleanly (`systemd-257-23.el10_2.2.alma.1.x86_64`).
+      SSSD's 8-`ExecStartPre` fan-out parses cleanly; SELinux PAM
+      modules (`pam_selinux_permit.so`, `pam_sepermit.so`) and the
+      RHEL `substack` control surface correctly alongside `include`.
+      Cockpit, podman, dnf-system-upgrade, setroubleshoot, hyperv*d
+      all attribute. `sshd_config` 0600 perms gracefully degrade
+      (surfaces with `unreadable` metadata + "rerun as root"). The
+      systemd-enable-symlink reattribution carries across to rpm
+      packages for the `dbus-org.*` compat alias family.
 
 ## Package-manager backends (beyond rpm/dpkg)
 
