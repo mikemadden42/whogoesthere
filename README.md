@@ -1,5 +1,7 @@
 # whogoesthere
 
+[![CI](https://github.com/mikemadden42/whogoesthere/actions/workflows/ci.yml/badge.svg)](https://github.com/mikemadden42/whogoesthere/actions/workflows/ci.yml)
+
 Linux persistence enumeration. Inspired by Patrick Wardle's macOS
 [KnockKnock](https://objective-see.org/products/knockknock.html), but
 re-thought from the ground up for Linux's very different persistence
