@@ -8,9 +8,11 @@ surface (systemd, cron, init, dotfiles, udev — not LaunchAgents and kexts).
 Surveys the high-value persistence vectors on a host and lists what's
 installed at each one, with **package-ownership attribution** so that
 distro-shipped entries are distinguishable from drops that no package owns.
-The `UNTRACKED` flag on a finding is the primary malware signal.
+The `UNTRACKED` flag on a finding is the primary malware signal; the
+`--diff` mode is the operationally useful complement — what's *new* since
+the last snapshot.
 
-## What it checks (v1)
+## What it checks
 
 | Checker     | What it surveys |
 |-------------|-----------------|
@@ -84,14 +86,13 @@ the host installed the package between runs) is not a diff event.
 Each finding looks like:
 
 ```
-[systemd] systemd service ExecStart= (system)
-  source:  /etc/systemd/system/display-manager.service
-  target:  /usr/bin/gdm
-  scope:   system
+[ssh] authorized_keys entry — grants passwordless SSH login
+  source:  /home/madden/.ssh/authorized_keys
+  target:  madden@old-laptop
+  scope:   user madden (uid 1000)
   package: UNTRACKED
-  description: GNOME Display Manager
-  directive: ExecStart
-  location: system
+  keytype: ssh-ed25519
+  line:    3
 ```
 
 - `source` — the config file that defines the persistence
@@ -111,7 +112,7 @@ cargo run --release -- --untracked-only --format json
 
 ## Performance
 
-A full run on Fedora 44 (1588 findings across all ten checkers) takes
+A full run on Fedora 44 (1725 findings across all 14 checkers) takes
 ~0.7s. Package-ownership attribution is the hot path; it's done once at
 startup by ingesting the entire `rpm` / `dpkg` / `pacman` / `apk` file index
 into a hash map, then served as O(1) lookups against each finding's source
@@ -162,11 +163,22 @@ cargo clippy --release --all-targets --all-features -- -Dwarnings -Adeprecated
 
 ## Status
 
-v1 is feature-complete for the ten checkers above. Tested on Fedora 44.
-Debian/Ubuntu validation pending. See [TODO.md](TODO.md) for the follow-up
-backlog: distro coverage, baseline+diff mode, and the remaining v2 vector
-list (D-Bus services, display manager, dispatcher scripts, package-manager
-hooks).
+v1 is feature-complete. 14 checker categories cover the major Linux
+persistence vectors; four package-manager attribution backends (rpm,
+dpkg, pacman, apk) all detected at startup and merged. `--diff` mode
+gives the operational workflow.
+
+Validated on:
+- **Fedora 44 (x86_64)** — 1725 findings, 13 UNTRACKED (irreducible: 9
+  SSH keys + 4 user dotfiles, exactly the analyst-worthy set).
+- **Ubuntu 24.04 (arm64)** — 1696 findings, 8 UNTRACKED (irreducible: 4
+  user dotfiles + 2 SSH keys + 1 custom unit + 1 netplan runtime case).
+
+Both at irreducible noise floors — every remaining UNTRACKED is a real
+triage target, not a false positive.
+
+Smoke-test pending on Arch (pacman) and Alpine (apk); both backends are
+written against documented DB formats but unverified on real data.
 
 ## Why the name?
 
