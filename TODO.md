@@ -186,16 +186,21 @@
       `/var/lib/pacman/local/*/files` layout but unverified. Check that
       `%FILES%`-section parsing is correct, total/UNTRACKED counts are sane,
       and that the directory-name-as-pkgid format reads cleanly in output.
-- [ ] Check snap-generated systemd units on Ubuntu. They live in
+- [x] Check snap-generated systemd units on Ubuntu. They live in
       `/etc/systemd/system/` and may all show as UNTRACKED because snapd
-      synthesizes them rather than dpkg-installing them. A pattern filter for
-      `snap.*` may be needed. *Confirmed on the 24.04 capture: ~13 systemd
-      units (`/etc/systemd/system/snap.*.service` and `/etc/systemd/user/
-      snap.*.service|timer`) plus 15 udev rules
-      (`/etc/udev/rules.d/70-snap.*.rules`) UNTRACKED — together ~28 of 84
-      total UNTRACKED, the single largest noise class on Ubuntu. See the
-      proposed snapd-attribution / pattern-tag follow-up under "Noise
-      reduction & output".*
+      synthesizes them rather than dpkg-installing them.
+      *Resolved by the snapd attribution backend.* The 24.04 capture
+      originally showed ~28 such entries UNTRACKED — 13 systemd units
+      (`/etc/systemd/system/snap.*.service` + `/etc/systemd/user/
+      snap.*.service|timer`) and 15 udev rules
+      (`/etc/udev/rules.d/70-snap.*.rules`). `OwnershipIndex::
+      resolve_snap_attribution` now parses the snap name from each
+      path, confirms it's installed via the pre-scanned `/snap/` and
+      `/var/lib/snapd/snaps/` sets, and attributes as
+      `PackageOrigin::Owned { package: "snap:<name>" }` with
+      `installer: snapd` metadata. Live Ubuntu 24.04 result: 27 of
+      27 snap-emitted entries reattributed cleanly, zero UNTRACKED
+      remaining in the snap noise class.
 - [ ] Run against Alpine (OpenRC, no systemd). Most checkers should
       gracefully no-op; verify nothing panics.
 
