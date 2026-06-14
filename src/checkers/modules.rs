@@ -29,12 +29,13 @@ impl Checker for ModulesChecker {
     fn run(&self) -> Vec<Finding> {
         let mut findings = Vec::new();
 
-        // Debian/Ubuntu legacy /etc/modules
+        // Legacy /etc/modules (Debian/Ubuntu, Alpine, others — read by kmod and
+        // various initramfs/openrc scripts)
         if let Ok(content) = fs::read_to_string("/etc/modules") {
             findings.extend(parse_module_list(
                 &content,
                 Path::new("/etc/modules"),
-                "auto-loaded at boot (Debian/Ubuntu /etc/modules)",
+                "auto-loaded at boot (/etc/modules)",
             ));
         }
 

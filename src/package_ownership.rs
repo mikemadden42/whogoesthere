@@ -107,21 +107,26 @@ impl OwnershipIndex {
         }
     }
 
-    /// For files that a Debian/Ubuntu package's postinst script creates (and
-    /// that dpkg therefore doesn't track in `.list`), attribute through to the
-    /// known owning package. Returns the package name as a `&'static str` —
-    /// the allowlist is a static table. A finding is only reattributed if it
-    /// reached this pass as `Untracked`, so a malicious file that *is* in some
-    /// package's `.list` (genuine ownership) is unaffected. The attribution is
-    /// best understood as "this file is known to be associated with package X
-    /// via its postinst" — same semantic as dpkg/rpm file ownership, which
-    /// also doesn't validate contents.
+    /// For files that a package's install-time script creates (and that the
+    /// package manager therefore doesn't track in its file index), attribute
+    /// through to the known owning package. Returns the package name as a
+    /// `&'static str` — the allowlist is a static table. A finding is only
+    /// reattributed if it reached this pass as `Untracked`, so a malicious
+    /// file that *is* in some package's index (genuine ownership) is
+    /// unaffected. The attribution is best understood as "this file is known
+    /// to be associated with package X via its install scripts" — same
+    /// semantic as dpkg/rpm/apk file ownership, which also doesn't validate
+    /// contents.
     ///
-    /// Catalogued cases (all diagnosed on Ubuntu 24.04):
-    ///   * `/etc/profile` ← base-files postinst
+    /// Catalogued cases:
+    ///   * `/etc/profile` ← base-files postinst (Ubuntu 24.04)
     ///   * `/etc/pam.d/common-{auth,account,password,session,
     ///     session-noninteractive}` ← libpam-runtime via `pam-auth-update`
-    ///   * `/etc/modules` ← kmod postinst (initramfs-tools on older releases)
+    ///     (Ubuntu 24.04)
+    ///   * `/etc/modules` ← kmod postinst (Ubuntu 24.04, initramfs-tools on
+    ///     older releases)
+    ///   * `/var/spool/cron/crontabs/root` ← busybox-openrc post-install
+    ///     drops the periodic-schedule crontab (Alpine)
     pub fn resolve_postinst_allowlist(&self, path: &Path) -> Option<&'static str> {
         // Gate on having a real package backend — on a host where
         // `detect_all()` returned empty, fabricating package names is wrong.
@@ -133,13 +138,15 @@ impl OwnershipIndex {
     }
 }
 
-/// Path → owning package for files known to be created by dpkg postinst
-/// scripts. dpkg's `.list` only records archive-unpacked files; postinst
-/// output is invisible to `dpkg-query -S`. rpm includes scriptlet-created
-/// files in its database, which is why this allowlist is dpkg-specific in
-/// practice — on rpm-based hosts these paths either don't exist (PAM
-/// `common-*`, `/etc/modules`) or are correctly attributed via the file
-/// index (`/etc/profile` → `setup` on Fedora).
+/// Path → owning package for files known to be created by a package's
+/// install-time scripts (dpkg postinst, apk post-install). dpkg's `.list`
+/// only records archive-unpacked files; postinst output is invisible to
+/// `dpkg-query -S`. apk has the same structural gap for `.post-install`
+/// scripts. rpm includes scriptlet-created files in its database, which is
+/// why this allowlist is dpkg/apk-specific in practice — on rpm-based hosts
+/// these paths either don't exist (PAM `common-*`, `/etc/modules`) or are
+/// correctly attributed via the file index (`/etc/profile` → `setup` on
+/// Fedora).
 const POSTINST_ALLOWLIST: &[(&str, &str)] = &[
     ("/etc/profile", "base-files"),
     ("/etc/pam.d/common-auth", "libpam-runtime"),
@@ -148,6 +155,7 @@ const POSTINST_ALLOWLIST: &[(&str, &str)] = &[
     ("/etc/pam.d/common-session", "libpam-runtime"),
     ("/etc/pam.d/common-session-noninteractive", "libpam-runtime"),
     ("/etc/modules", "kmod"),
+    ("/var/spool/cron/crontabs/root", "busybox-openrc"),
 ];
 
 /// Try each known benign-symlink discriminator in turn; return the matching
@@ -874,6 +882,12 @@ R:rootonly
         assert_eq!(
             idx.resolve_postinst_allowlist(Path::new("/etc/modules")),
             Some("kmod")
+        );
+        // /var/spool/cron/crontabs/root is dropped by busybox-openrc's
+        // post-install on Alpine (the periodic-schedule defaults).
+        assert_eq!(
+            idx.resolve_postinst_allowlist(Path::new("/var/spool/cron/crontabs/root")),
+            Some("busybox-openrc")
         );
     }
 
