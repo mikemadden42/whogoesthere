@@ -201,6 +201,13 @@ Validated on:
   `20packagekit` gdbus invocation. Capture also surfaced a latent
   udev parser bug (escaped quotes inside `IMPORT{program}=` shell
   commands) that's been fixed.
+- **EndeavourOS (pacman, GNOME)** — 1411 findings, 5 UNTRACKED (all
+  user dotfiles). Re-exercises the pacman backend on a different Arch
+  derivative: epoch-prefixed package versions (`gnome-keyring-1:50.0-1`)
+  attribute cleanly, the 416-entry `40-usb_modeswitch.rules` RUN+= table
+  parses without anomalies, and 13 `\"`-escaped quotes inside systemd
+  `ExecStart=` directives (sshd@.service, xfs_scrub_fail, pkgfiled)
+  come through intact.
 
 All on irreducible noise floors — every remaining UNTRACKED is a real
 triage target, not a false positive.
