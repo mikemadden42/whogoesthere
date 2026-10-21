@@ -53,7 +53,7 @@
       so a `0600 root:root` file like `/etc/profile.d/debuginfod.sh` running
       unprivileged is no longer indistinguishable from a benign empty
       finding. `scan_inittab` already reads content directly and returns no
-      findings on failure — separate bug, out of scope here.
+      findings on failure — tracked separately below.
 - [x] **`which()` shells out per probe** (`package_ownership.rs`) via
       `sh -c "command -v <prog>"`. *Done.* Replaced with a native `$PATH`
       walk that reads `$PATH`, splits on `:`, and checks each candidate
@@ -74,7 +74,9 @@
       why we exclude the 1–999 range (daemon dotfiles are noise, and
       daemons don't typically host persistence in their `$HOME`), and
       the accepted trade-off (a service account at UID 500 with a real
-      login shell wouldn't be surveyed). No behavior change.
+      login shell wouldn't be surveyed). No behavior change. The trade-off
+      holds for dotfiles but not for `ssh` — see the open "SSH checker
+      misses common key locations" item below.
 - [x] **`SystemdChecker` reports `Scope::System` for the `user-global` unit
       dirs** (`/etc/systemd/user`, `/usr/lib/systemd/user`, etc.). *Done.*
       Added `Scope::UserGlobal` variant to the `Scope` enum
@@ -101,7 +103,7 @@
       occurred. Regenerate the baseline after upgrading. Total findings,
       UNTRACKED counts, and attribution all unchanged.
 - [x] **`cron::scan_user_spool` falls back to uid 0 for unknown usernames**
-      (`src/checkers/cron.rs:276`). *Done.* The lookup now returns
+      (`cron::scan_user_spool`). *Done.* The lookup now returns
       `(uid, orphan: bool)` instead of silently using uid 0. When the
       user doesn't exist, the finding is still emitted (its presence is
       triage-relevant — stale admin state, or an attacker creating a
@@ -109,13 +111,87 @@
       `orphan_spool_owner: "user does not exist — cron skips this file
       at run time"` metadata so the analyst sees that cron itself won't
       run it. No-orphan path is unchanged.
+- [ ] **Postinst allowlist attributes paths without checking the package is
+      installed (high severity).** `resolve_postinst_allowlist`
+      matches on path alone, gated only on *some*
+      backend existing. The Alpine entry `/var/spool/cron/crontabs/root →
+      busybox-openrc` therefore fires on every Debian/Ubuntu host, which uses
+      the same spool path — root's personal crontab is always reported
+      `Owned { busybox-openrc }` and disappears from `--untracked-only`.
+      Confirmed on Ubuntu 26.04: `dpkg -s busybox-openrc` reports not
+      installed. Same latent problem for the `libpam-runtime`, `kmod`, and
+      `base-files` entries on distros that don't ship those packages.
+      Fix: tag each entry with its backend (apk vs dpkg) and/or require the
+      named package to be present in the index (needs a set of installed
+      package *names* alongside the path map — rpm/pacman/apk values are
+      NVR-style, so store the bare name separately). Add a unit test that the
+      root-crontab entry no-ops on a dpkg-only index.
+- [ ] **Content modifications to whole-file findings are invisible to both
+      signals.** `shell`, `init` (`rc.local`), `display_manager`,
+      `network_manager`, and `ssh` (`~/.ssh/rc`, `/etc/ssh/sshrc`) emit one
+      finding per file with `target: None`. `diff_key` ignores metadata, and
+      package ownership doesn't validate contents, so appending
+      `curl … | sh` to `/etc/bash.bashrc` or `~/.bashrc` shows up neither as
+      UNTRACKED nor in `--diff` — arguably the most common real-world Linux
+      persistence technique. (Line-granular checkers — pam, systemd Exec*,
+      cron, udev — already catch edits because `target` changes.) Fix, in
+      two parts: (a) record a `sha256` for whole-file findings and either fold
+      it into the diff key or surface a third `modified` diff bucket so
+      edits don't render as remove+add; (b) verify owned files against the
+      package manager's recorded digests — dpkg `info/*.md5sums`, rpm
+      `%{FILEDIGESTS}`, pacman `mtree`, apk `Z:` — and surface a
+      `modified_since_install` flag. (b) also covers tampering with owned
+      PAM, sshd, and unit files, which the existing PAM caveat calls out.
+- [ ] **SSH checker misses common key locations.** (`SshChecker::run`)
+      * `~/.ssh/authorized_keys2` is never read, but OpenSSH's compiled-in
+        `AuthorizedKeysFile` default is `.ssh/authorized_keys
+        .ssh/authorized_keys2` (Ubuntu's stock `sshd_config` shows exactly
+        that, commented). Classic hiding spot.
+      * A custom `AuthorizedKeysFile` in `sshd_config` /
+        `sshd_config.d/*.conf` is ignored. The checker already parses those
+        files for `ForceCommand`; parse this too and expand `%h`/`%u`/`%%`.
+      * `real_users()` excludes UID 1–999, but sshd will accept a key for
+        any account with a valid login shell — e.g. Debian's `postgres`
+        (`/bin/bash`, home `/var/lib/postgresql`), or an attacker-created
+        UID 998 account. The dotfile-noise rationale for the UID filter
+        doesn't apply here. Use an "any account with a login shell" helper
+        for `ssh` (and consider it for `systemd --user` and autostart).
+- [ ] **`rpm` and backend detection resolve via `$PATH`.**
+      `build_rpm_index` runs `Command::new("rpm")` and `detect_all` probes
+      `which()` against `$PATH`. On a possibly-compromised host — the tool's
+      core use case, often run as root — a planted `rpm` earlier in `$PATH`
+      can forge the ownership index (marking anything `Owned`) or simply
+      execute as root. Use absolute paths (`/usr/bin/rpm`, falling back to
+      `/bin/rpm`). Separately, dpkg/pacman/apk indices are read directly
+      from their DB files, so detect those by DB presence
+      (`/var/lib/dpkg/info`, `/var/lib/pacman/local`, `/lib/apk/db/installed`)
+      rather than binary-on-`$PATH` — a minimal cron/systemd environment
+      without `/usr/bin` on `$PATH` currently drops to `Unknown` for every
+      finding.
+- [ ] **Diff identity is set-based, so duplicates collapse.** `diff_snapshots`
+      builds `HashSet`s of keys; if the new snapshot contains a second
+      identical finding (e.g. the same `authorized_keys` line appended
+      twice, or a duplicated crontab line), it isn't reported as added.
+      Compare as multisets (key → count) instead.
+- [ ] **`real_users()` shell filter uses substring match** (`util::real_users`).
+      `!shell.contains("false")` also excludes any shell path that merely
+      contains "false"; `nologin` likewise. Match on the basename
+      (`ends_with("/false")`, `ends_with("/nologin")`) instead.
+- [ ] **`init::scan_inittab` silently drops an unreadable `/etc/inittab`.**
+      Unlike `scan_rc_local` and `scan_initd`, a failed read returns no
+      findings rather than a marker finding with `unreadable` metadata.
+      Low severity (`/etc/inittab` is normally world-readable), but it's
+      the one remaining checker path that hides a present-but-unreadable
+      file. Emit a single file-level finding with the `unreadable` marker
+      on read failure, matching the other `init` paths.
 
 ## Testing
 
 - [x] **No unit tests exist anywhere in the tree.** *Largely addressed.* All
-      four high-value parser targets now have unit-test coverage; the suite
-      stands at 31 tests across `systemd`, `udev`, `cron`, and
-      `package_ownership`:
+      four high-value parser targets now have unit-test coverage. (The suite
+      has since grown to 114 tests across every module except `shell`,
+      `modules`, `init`, and `autostart`; the breakdown below is the
+      original 31-test landing.)
       - `udev::extract_with_prefixes` — 7 tests covering each assignment
         operator variant (`+=`/`:=`/`=`), multiple directives per line, the
         no-quote skip path, the unterminated-quote early return, the
@@ -138,10 +214,23 @@
         edge cases, blank-line handling, `%FILES%` section gating including
         multiple `%FILES%` headers, `%BACKUP%`/other-section rejection, and
         the `/`-prefix prepending.
-      Remaining gaps are intentional: per-checker `run()` entry points still
-      touch the filesystem and aren't unit-testable without a temp-dir
-      framework; the merged-`/usr` rewrite and dbus-org alias discriminators
-      were already covered in prior commits.
+      Remaining gaps at the time: per-checker `run()` entry points touch
+      the filesystem directly; the merged-`/usr` rewrite and dbus-org alias
+      discriminators were already covered in prior commits. Since then,
+      `display_manager`, `network_manager`, and `ld_so` have added ad hoc
+      `std::env::temp_dir()` tests for their per-directory/per-file scan
+      helpers.
+- [ ] **Root-prefix / temp-dir harness for checker `run()` paths.** The
+      open correctness items above (postinst allowlist, `authorized_keys2`,
+      sub-1000 accounts, content hashing) all live in filesystem-walking
+      code. `display_manager`, `network_manager`, and `ld_so` already test
+      their scan helpers against ad hoc `std::env::temp_dir()` paths, but
+      `shell`, `modules`, `init`, and `autostart` have zero tests, and no
+      checker's `run()` (hardcoded absolute paths + `real_users()`) is
+      testable. Thread an optional root prefix through the checkers (or a
+      small `Fs` abstraction) so a tempdir can stand in for `/`, promote the
+      existing ad hoc tempdir helpers into a shared one, and add regression
+      tests for each fix as it lands.
 
 ## Performance
 
@@ -260,11 +349,12 @@
 
 ## Package-manager backends (beyond rpm/dpkg)
 
-The package-ownership cache currently has two backends: rpm (via `rpm -qa`)
-and dpkg (via `/var/lib/dpkg/info/*.list`). On any other distro, `detect()`
-returns `PackageManager::None` and every finding gets `PackageOrigin::Unknown`
-— the tool still surveys persistence, it just can't attribute. Tiered by
-ROI for adding more:
+The package-ownership cache has four backends: rpm (via `rpm -qa`), dpkg
+(via `/var/lib/dpkg/info/*.list`), pacman (via `/var/lib/pacman/local/*/files`),
+and apk (via `/lib/apk/db/installed`). On any other distro, `detect_all()`
+returns an empty `Vec` and every finding gets `PackageOrigin::Unknown` — the
+tool still surveys persistence, it just can't attribute. Tiered by ROI for
+adding more:
 
 ### Worth adding
 - [x] **Arch (pacman).** *Validated on a Manjaro VM.* Pre-scan walks
@@ -329,7 +419,9 @@ ROI for adding more:
       checkers (12 dbus-org.* aliases reattributed at both system and
       user-global scope). Unit-tested via `is_fedora_dbus_alias` cases for
       both scopes plus rejection of wrong-prefix, wrong-extension, and
-      wrong-directory shapes.
+      wrong-directory shapes. (Since generalized — the discriminator is now
+      `is_systemd_enable_symlink_candidate` and the tag is
+      `systemd-enable-symlink`; see below.)
 - [x] `--untracked-only` flag. The malware-detection workflow is "show me
       what's not in any package" — currently the user pipes through `jq`.
       *Done.* New `Cli::untracked_only` bool; when set, the post-attribution
@@ -355,8 +447,9 @@ ROI for adding more:
       `dbus.service` scopes, `pipewire-session-manager.service` — even
       `intel_lpmd` turned out packaged, exceeding the predicted ~15).
       Remaining 13 UNTRACKED are the irreducible set: 9 SSH keys + 4
-      user dotfiles. Ubuntu effect predicted ~84 → ~54; pending a
-      live-host re-run to confirm. Tests rewritten to cover both the
+      user dotfiles. Ubuntu effect was predicted ~84 → ~54; the later
+      Ubuntu 24.04 capture (after all noise-reduction passes landed)
+      settled at 8 UNTRACKED — see Distro coverage. Tests rewritten to cover both the
       original dbus-org cases and the new `sshd.service`,
       `display-manager.service`, `iscsi.service`, `*.timer`, `*.socket`,
       `*.path` shapes, plus rejection of `.conf`/`.target`/missing
@@ -392,8 +485,9 @@ ROI for adding more:
       "snap:<name>" }` and gain `installer: snapd` metadata so they're
       trivially filterable. Fedora effect: zero (no `/snap`, probe
       no-ops). Ubuntu effect: predicted 60 → ~32 UNTRACKED collapsing the
-      13 systemd + 15 udev snap entries; pending a live-host re-run to
-      confirm. 3 unit tests cover the parser: positive cases for
+      13 systemd + 15 udev snap entries; confirmed on the Ubuntu 24.04
+      capture — 27 of 27 snap-emitted entries reattributed (see Distro
+      coverage). 3 unit tests cover the parser: positive cases for
       `snap.cups.cupsd.service`, `snap.mesa-2404.component-monitor.service`,
       `snap.firmware-updater.firmware-notifier.timer`,
       `snap.snapd-desktop-integration.snapd-desktop-integration.service`,
@@ -418,7 +512,7 @@ ROI for adding more:
       UNTRACKED still 13). Ubuntu effect predicted: 33 → 32 (just the one
       symlink on this capture; the discriminator generalizes to any
       future postinst-dropped `/etc/profile.d/*.sh → /usr/share/...`
-      symlink). 3 unit tests added: positive cases for `debuginfod.sh`
+      symlink). Superseded by the final Ubuntu 24.04 count of 8 UNTRACKED. 3 unit tests added: positive cases for `debuginfod.sh`
       and `01-locale-fix.sh`; negative cases for `/etc/bash.bashrc`,
       `/etc/profile.d/README` (no extension), `/etc/profile.d/foo.csh`
       (wrong ext), `/usr/share/libdebuginfod-common/debuginfod.sh` (wrong
@@ -427,29 +521,36 @@ ROI for adding more:
 - [x] **Known-postinst-generated allowlist for non-symlink files like
       `/etc/profile`, `/etc/pam.d/common-*`, `/etc/modules`.** *Done.* New
       `POSTINST_ALLOWLIST` static table in `package_ownership.rs` maps each
-      known postinst-emitted path to its owning Debian package:
+      known install-script-emitted path to its owning package:
       `/etc/profile` → `base-files`; `/etc/pam.d/common-{auth,account,
       password,session,session-noninteractive}` → `libpam-runtime`;
-      `/etc/modules` → `kmod`. `OwnershipIndex::resolve_postinst_allowlist`
+      `/etc/modules` → `kmod` (all Debian/Ubuntu); and, added later in
+      `8f6ca17`, `/var/spool/cron/crontabs/root` → `busybox-openrc`
+      (Alpine). `OwnershipIndex::resolve_postinst_allowlist`
       gates on `self.files.is_some()` so the allowlist doesn't fire when
-      no package backend was detected — fabricating package names on a
-      non-dpkg/-rpm host would be wrong. Wired into `main.rs` as the third
+      no package backend was detected. **That gate is insufficient** — it
+      doesn't check that the named package is installed or that the entry
+      belongs to the detected backend, so the Alpine crontab entry fires on
+      Debian/Ubuntu; see the open "Postinst allowlist attributes paths
+      without checking the package is installed" item. Wired into `main.rs` as the third
       post-attribution pass; attributed findings emit
       `installer: postinst-<pkgname>` metadata so the attribution
       mechanism is auditable. Caveat (same as dpkg/rpm file ownership in
       general): attribution doesn't validate file contents, so an
       attacker-modified `/etc/profile` would still get marked
       `base-files`. The malware-triage workflow's primary signal remains
-      UNTRACKED + the broader signal (`mtime`, contents review). 5 unit
-      tests added: positive cases for all 7 catalogued paths via a small
+      UNTRACKED + the broader signal (`mtime`, contents review); content
+      verification is now tracked as the open "Content modifications to
+      whole-file findings" item. 5 unit tests added (since extended to all
+      8 catalogued paths): positive cases for the catalogued paths via a small
       `idx_with_backend()` helper; negative cases for non-allowlisted
       paths (`/etc/bash.bashrc`, `/etc/pam.d/sshd`, `/etc/passwd`); a
       no-backend gate test that confirms the allowlist no-ops when
       `files` is `None`. Fedora effect: zero (rpm correctly owns
       `/etc/profile` via `setup`; the other paths don't exist there).
-      Ubuntu effect predicted: 32 → ~9 (22 PAM + `/etc/profile` collapse;
-      `/etc/modules` stays UNTRACKED if kmod isn't in the package index,
-      but if it is, that drops too).
+      Ubuntu effect predicted: 32 → ~9; measured 32 → 8. `/etc/modules`
+      isn't listed in any dpkg `.list` (checked on Ubuntu 26.04), so its
+      attribution comes from the allowlist, not the package index.
 - [ ] **Runtime-generated units under `/run/systemd/system/` from real
       packages (low priority, single-case so far).** The Ubuntu 24.04
       capture surfaced one such entry: `/run/systemd/system/
@@ -518,6 +619,8 @@ ROI for adding more:
       tampering with an existing package-owned file still attributes the
       finding to the package's owner — improving that requires resolving
       module paths against the package index, which is left for follow-up.
+      (File-level tamper detection via package digests is now tracked in
+      the open "Content modifications to whole-file findings" item.)
       9 unit tests cover the parser (minimal/with-args/leading-dash/
       bracketed-control/include/whitespace-tolerance/comment-skip/
       unknown-type-rejection/truncated-line-rejection). On this Fedora
@@ -636,6 +739,34 @@ ROI for adding more:
       logic lives in plugin Python source; the right Fedora analog
       is probably rpm scriptlet enumeration (`%pre`/`%post`/etc.) but
       that's a structurally different design.
+- [ ] **systemd coverage gaps.**
+      * `.socket` units support `ExecStartPre`/`ExecStartPost`/
+        `ExecStopPre`/`ExecStopPost`; `emit_socket` only reports `Listen*`.
+      * Generators — executables in `/etc/systemd/system-generators/`,
+        `/usr/lib/systemd/system-generators/`, `/run/systemd/system-generators/`
+        (and the `user-generators` equivalents, plus
+        `/usr/local/lib/systemd/*-generators/`) — run as root early at every
+        boot and every `daemon-reload`. One finding per executable, same
+        shape as `network_manager`.
+      * Unit search path misses `/usr/local/lib/systemd/system`,
+        `/usr/local/lib/systemd/user`, and per-user
+        `~/.local/share/systemd/user`.
+- [ ] **modprobe `remove` directives.** `parse_install_directive`
+      (`modules.rs`) only matches `install <module> <cmd>`; `remove <module>
+      <cmd>` also runs an arbitrary command (on `modprobe -r`). Same parser,
+      second keyword.
+- [ ] **Additional shell-sourced files.**
+      * `~/.bash_aliases` — sourced by Debian/Ubuntu's default `.bashrc`.
+      * `/etc/bash_completion.d/*` and `/usr/share/bash-completion/completions/*`
+        — sourced by every interactive bash with bash-completion enabled.
+      * fish: `/etc/fish/config.fish`, `/etc/fish/conf.d/*.fish`,
+        `~/.config/fish/config.fish`, `~/.config/fish/conf.d/*.fish`.
+      * `~/.config/environment.d/*.conf`, `/etc/environment.d/*.conf` —
+        systemd user-session environment; can set `LD_PRELOAD` for the whole
+        graphical session (overlaps with `ld_so`).
+- [ ] **`/etc/update-motd.d/`.** Ubuntu's `pam_motd` runs every executable
+      here as root on each SSH/console login. One finding per script,
+      `network_manager`-style (`executable`, `size_bytes`).
 
 ## Parser edge cases
 
@@ -656,7 +787,7 @@ ROI for adding more:
       logical line to the existing extractor. Same shared helper as the
       systemd path.
 - [x] **`cron::parse_cron_line` collapses internal whitespace in the command
-      field** (`src/checkers/cron.rs:97-105`). *Done.* `parse_cron_line`
+      field** (`cron::parse_cron_line`). *Done.* `parse_cron_line`
       now calls a new `byte_offset_after_n_tokens` helper to find the
       byte position just past the schedule (and optional user) tokens in
       the original line, then takes the remainder verbatim — preserving
@@ -664,7 +795,7 @@ ROI for adding more:
       through to the shell. `scan_anacrontab` got the same treatment.
       Unit test covers the multi-space-plus-tab round-trip case.
 - [x] **`ld_so::check_environment_file` strips quotes with `trim_matches`**
-      (`src/checkers/ld_so.rs:63`). *Done.* New `unquote_env_value` helper
+      (`ld_so::check_environment_file`). *Done.* New `unquote_env_value` helper
       only strips one matching pair of outer quotes (same kind on both
       sides). `"'inner'"` now correctly resolves to `'inner'` instead of
       having both layers eaten. Unit test covers `""` / `''` pairs,
@@ -690,7 +821,8 @@ ROI for adding more:
 ## Style / cosmetic
 
 - [x] **`is_fedora_dbus_alias` is named Fedora-specific but the pattern likely
-      generalizes** (`src/package_ownership.rs:75`). *Done — implicitly
+      generalizes** (`package_ownership::is_fedora_dbus_alias`, since
+      removed). *Done — implicitly
       addressed when the discriminator was generalized.* `is_fedora_dbus_alias`
       was replaced by `is_systemd_enable_symlink_candidate`, which is named
       for the broader pattern it actually recognizes (any
